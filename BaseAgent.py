@@ -93,7 +93,8 @@ class BaseAgent(object):
         raise ValueError("Step needs to be implemented by the agent")
 
     def get_state_size(self):
-        return self.environment.observation_shape[0]
+        random_state = self.environment.reset()
+        return len(random_state)
 
     def get_action_size(self):
         return self.environment.action_space.nvec

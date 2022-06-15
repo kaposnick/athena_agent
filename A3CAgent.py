@@ -17,7 +17,7 @@ class A3CAgent(BaseAgent):
         super(A3CAgent, self).__init__(config)  
         self.num_processes = num_processes
 
-    def run_n_episodes(self, inp_obs_queues, out_act_queue, inp_rew_queues):
+    def run_n_episodes(self):
         results_queue = mp.Queue()
         gradient_updates_queue = mp.Queue()
         results_queue = mp.Queue()
@@ -67,14 +67,8 @@ class A3CAgent(BaseAgent):
             
             print('Optimizer thread started successfully')
             for process_num in range(self.num_processes):
-                worker_environment = copy.deepcopy(self.environment)
-                worker_environment.set_queues(
-                    input_observation_queue = inp_obs_queues[process_num],
-                    output_action_queue     = out_act_queue,
-                    input_reward_queue      = inp_rew_queues[process_num]
-                )
                 worker = Actor_Critic_Worker(process_num, 
-                                            worker_environment, self.optimizer_lock,
+                                            copy.deepcopy(self.environment), self.optimizer_lock,
                                             self.config, episodes_per_process, 
                                             self.state_size, self.action_size, self.action_types, 
                                             results_queue, gradient_updates_queue, episode_number)
