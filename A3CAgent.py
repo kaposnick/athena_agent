@@ -322,22 +322,8 @@ class Actor_Critic_Worker(mp.Process):
                         state = self.reset_game_for_worker()
                         done = False
                         while not done:
-                            ac_start = time.time()
                             action, action_p, action_logp, critic_output = self.pick_action_and_get_critic_values(self.local_model, state, tf)
-                            ac_end = time.time()
-                            self.times_ac.append((ac_end - ac_start) * 1000)
-
-                            with tape.stop_recording():
-                                env_start = time.time()
-                                try:
-                                    next_state, reward, done, _ = self.environment.step(action)
-                                except Exception as e:                                    
-                                    print(state)
-                                    print(action_p)
-                                    print(action_logp)
-
-                                env_end = time.time()
-                                self.times_env.append((env_end - env_start) * 1000)
+                            next_state, reward, done, _ = self.environment.step(action)
                             
                             self.batch_action_mcs.append(action[0])
                             self.batch_action_prb.append(action[1])
@@ -348,7 +334,6 @@ class Actor_Critic_Worker(mp.Process):
                             state = next_state
                             batch_idx += 1
 
-                    loss_start = time.time()
                     advantage = tf.expand_dims(tf.convert_to_tensor(self.batch_rewards, dtype = tf.float32), axis = 1) -  \
                                 tf.squeeze(tf.convert_to_tensor(self.batch_critic_outputs, dtype = tf.float32), axis = 2)
                     critic_loss = advantage ** 2
@@ -366,6 +351,7 @@ class Actor_Critic_Worker(mp.Process):
                             for logp_mcs, logp_prb, mcs, prb in zip(batch_logp_mcs, batch_logp_prb, batch_action_mcs, batch_action_prb)],
                             dtype = tf.float32), axis = 1)
 
+                    actor_loss = joint_action_logp
                     if (self.include_entropy_term):
                         joint_prob = tf.linalg.matmul(
                             batch_p_mcs, batch_p_prb, 
@@ -373,16 +359,14 @@ class Actor_Critic_Worker(mp.Process):
                         
                         plogp = tf.math.xlogy(joint_prob, joint_prob, name = 'plogp')
                         entropy = -1 * tf.expand_dims(tf.reduce_sum(plogp, axis = [1, 2], name = 'batch_entropy'), axis = 1)
+                        actor_loss += entropy
 
-                    actor_loss = -(joint_action_logp * advantage +  self.entropy_beta * entropy)
+                    actor_loss = -1 * actor_loss
 
                     actor_loss_mean = tf.reduce_mean(actor_loss)
                     critic_loss_mean = tf.reduce_mean(critic_loss)
                     
-                    total_loss = actor_loss_mean + critic_loss_mean
-                    loss_end = time.time()
-
-                    
+                    total_loss = actor_loss_mean + critic_loss_mean                    
 
                 rew_mean = np.mean(self.batch_rewards)
                 entropy_mean = np.mean(entropy)

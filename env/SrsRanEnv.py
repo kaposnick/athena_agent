@@ -18,10 +18,12 @@ MCS_SPACE = np.arange(0, 25,  dtype=np.float16)
 class SrsRanEnv():
     def __init__(self,
                  title,
+                 verbose = 0,
                  penalty = 15) -> None:
         super(SrsRanEnv, self).__init__()
         self.penalty = penalty
         self.title = title
+        self.verbose = verbose
 
         # Define a 1-D observation space
         self.observation_shape = (3,)
@@ -44,17 +46,10 @@ class SrsRanEnv():
         return self.title
 
     def __str__(self) -> str:
-        return self.title
+        return self.get_environment_title()
     
     def translate_action(self, action):
         return int(MCS_SPACE[action[0]]), int(PRB_SPACE[action[1]])
-    
-    def run(self):
-        while(True):
-            self.reset()
-            # print('{} - Obs: {}'.format(str(self), self.observation))
-            action = (10 + self.n, 1 + self.n)
-            _, reward, _, _ = self.step(action)
 
     def reward(self, crc, decoding_time, tbs):
         reward = 0
@@ -65,11 +60,12 @@ class SrsRanEnv():
         return reward
         
     def step(self, action):        
-        # mcs, prb = self.translate_action(action)
-        mcs, prb = action[0], action[1]
+        mcs, prb = self.translate_action(action)
         self.action_queue.put([mcs, prb])
         reward = self.reward_queue.get(block = True)
-        print('{} - Rew: {}'.format(str(self), reward))
+
+        if (self.verbose == 1):
+            print('{} - Rew: {}'.format(str(self), reward))
         
         tti, crc, decoding_time, tbs = reward
         result = self.reward(crc, decoding_time, tbs)
