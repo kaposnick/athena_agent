@@ -6,10 +6,17 @@ import numpy as np
 import BaseAgent
 import multiprocessing as mp
 from BaseAgent import BaseAgent
-from agents.common_utils import import_tensorflow
-from agents.env.DecoderEnv import MCS_SPACE, PRB_SPACE
+from common_utils import import_tensorflow
+from env.SrsRanEnv import MCS_SPACE, PRB_SPACE
 
-from scripts.utils import COL_DT_AC_LOSS_MEAN, COL_DT_CR_LOSS_MEAN, COL_DT_ENTROPY_MEAN, COL_DT_MCS_MEAN, COL_DT_PRB_MEAN, COL_DT_REP, COL_DT_REWARD_MEAN, COL_DT_REWARD_SCALING, COL_DT_SIM, COLUMNS_DT_V1
+COL_DT_AC_LOSS_MEAN = 'ac_loss_mean'
+COL_DT_CR_LOSS_MEAN = 'cr_loss_mean'
+COL_DT_ENTROPY_MEAN = 'entropy'
+COL_DT_MCS_MEAN = 'mcs_mean'
+COL_DT_PRB_MEAN = 'prb_mean'
+COL_DT_REP = 'rep'
+COL_DT_REWARD_MEAN = 'reward_mean'
+COL_DT_SIM = 'sim'
 
 class A3CAgent(BaseAgent):
     agent_name = "A3C"
@@ -30,7 +37,7 @@ class A3CAgent(BaseAgent):
         global_process_stop = mp.Value('i', 0)
         
         self.optimizer_lock = mp.Lock()
-        save_file = self.config.save_file
+        save_file = self.config.results_file_path
 
         if (self.config.num_episodes_to_run > 0):
             episodes_per_process = int(self.config.num_episodes_to_run / self.num_processes)
@@ -170,7 +177,7 @@ class A3CAgent(BaseAgent):
         exited_successfully = False
         try:
             learning_rate = hyperparameters['Actor_Critic_Common']['learning_rate']
-            tf, os = import_tensorflow('1')
+            tf, os = import_tensorflow('3')
             import queue
             os.environ['PYTHONHASHSEED'] = str(self.config.seed)
             random.seed(self.config.seed)
@@ -190,9 +197,9 @@ class A3CAgent(BaseAgent):
             self.shm, self.shared_weights_array = A3CAgent.get_shared_memory_ref(
                 memory_size_in_bytes.value,
                 model_dtype)
-            if (self.config.load_weights):
+            if (self.config.load_initial_weights):
                 print('Loading previous weights to continue training')
-                self.global_model.load_weights(self.config.weights_path)
+                self.global_model.load_weights(self.config.initial_weights_path)
             else:
                 print('Not loading any weights')
             A3CAgent.publish_weights_to_shared_memory(self.global_model.get_weights(), self.shared_weights_array)                
@@ -212,13 +219,13 @@ class A3CAgent(BaseAgent):
                         for weight in self.global_model.get_weights():
                             if (np.isnan(weight).any()):
                                 print('Master has a model with weights with nan elements')
-                                self.save_weights(self.config.save_weights_file)
+                                self.save_weights(self.config.weights_file_path)
                                 break
                         A3CAgent.publish_weights_to_shared_memory(self.global_model.get_weights(), self.shared_weights_array)
 
                     gradient_calculation_idx += 1
                     if (self.config.save_weights and gradient_calculation_idx % self.config.save_weights_period == 0):
-                        self.save_weights(self.config.save_weights_file)
+                        self.save_weights(self.config.weights_file_path)
                 except queue.Empty:
                     if (global_process_stop.value == 1):
                         exited_successfully = True
@@ -228,7 +235,7 @@ class A3CAgent(BaseAgent):
             if (exited_successfully):
                 print('Exiting successfully after all episodes run...')
                 if (self.config.save_weights):
-                    self.save_weights(self.config.save_weights_file)
+                    self.save_weights(self.config.weights_file_path)
             else:                
                 self.save_weights('/home/naposto/phd/nokia/data/csv_41/entropy_0.1_model_error_happened.h5')
             self.exit_gracefully(False)
@@ -301,7 +308,7 @@ class Actor_Critic_Worker(mp.Process):
 
             import time
             for ep_ix in range(self.episodes_to_run):
-                if (ep_ix % 100 == 0):
+                if (ep_ix % 1 == 0):
                     print('Episode {}/{}'.format(ep_ix, self.episodes_to_run))
                 if (ep_ix % self.local_update_period == 0):
                     with self.optimizer_lock:

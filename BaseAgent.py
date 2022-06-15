@@ -1,9 +1,10 @@
 import logging
 import os
 import numpy as np
-from agents.env.DecoderEnv import BETA_MAX, BETA_MIN, BSR_MAX, BSR_MIN, NOISE_MAX, NOISE_MIN
 
 import time
+
+from env.DecoderEnv import BETA_MAX, BETA_MIN, BSR_MAX, BSR_MIN, NOISE_MAX, NOISE_MIN
 
 class BaseAgent(object):
     def __init__(self, config) -> None:

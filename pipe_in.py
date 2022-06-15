@@ -1,9 +1,9 @@
 from sys import byteorder
-from SrsRanEnv import SrsRanEnv
+from env.SrsRanEnv import SrsRanEnv
 import multiprocessing as mp
-from nokia.agents.Config import Config
+from Config import Config
+from A3CAgent import A3CAgent
 
-from nokia.agents.test_agent import A3C_Agent
 
 ACTOR_IN = '/tmp/actor_in'
 ACTOR_OUT = '/tmp/actor_out'
@@ -19,7 +19,7 @@ class Coordinator():
 
         self.config = self.get_environment_config()
         
-        self.a3c_agent = A3C_Agent(self.config, self.total_agents)
+        self.a3c_agent = A3CAgent(self.config, self.total_agents)
 
         self.sched_proc = mp.Process(target=self.rcv_obs_send_act_func, name= 'scheduler_intf')
         self.decod_proc = mp.Process(target=self.rcv_return_func, name='decoder_intf')
@@ -33,6 +33,7 @@ class Coordinator():
         config.results_file_path = '/home/naposto/phd/nokia/data/csv_42/results.csv'
 
         config.save_weights = True
+        config.save_weights_period = 100
         config.weights_file_path = '/home/naposto/phd/nokia/data/csv_42/weights.h5'
         
         config.load_initial_weights = True
@@ -76,7 +77,7 @@ class Coordinator():
         while (not is_file_open):
             try:
                 with open(REWARD_IN, mode='rb') as file_read:
-                    if_file_open = True
+                    is_file_open = True
                     while (True):
                         content = file_read.read(16)
                         if (len(content) <= 0):
@@ -88,7 +89,8 @@ class Coordinator():
                         crc = int.from_bytes(content[8:9], "little")
                         dec_bits = int.from_bytes(content[12:], "little")
 
-                        reward_buffer = [tti, crc, dec_time, dec_bits]
+                        reward_buffer = [crc, dec_time, dec_bits]
+                        print('Rew {}'.format([tti, *reward_buffer]))
                         agent_idx = tti % self.total_agents
                         self.rew_q[agent_idx].put(reward_buffer)
             except FileNotFoundError as e:
@@ -114,7 +116,8 @@ class Coordinator():
                             noise =  int.from_bytes(content[8:12], "little", signed = True)
                             beta = int.from_bytes(content[12:], "little")
                             
-                            observation = [tti, noise, beta, bsr]
+                            observation = [noise, beta, bsr]
+                            print('Obs {}'.format([tti, *observation]))
 
                             agent_idx = tti % self.total_agents
                             self.obs_q[agent_idx].put(observation)

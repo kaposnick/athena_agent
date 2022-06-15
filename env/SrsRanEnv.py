@@ -67,7 +67,7 @@ class SrsRanEnv():
         if (self.verbose == 1):
             print('{} - Rew: {}'.format(str(self), reward))
         
-        tti, crc, decoding_time, tbs = reward
+        crc, decoding_time, tbs = reward
         result = self.reward(crc, decoding_time, tbs)
         return None, result, True, {} 
 
