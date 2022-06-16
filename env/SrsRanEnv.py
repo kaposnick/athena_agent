@@ -73,17 +73,21 @@ class SrsRanEnv():
         self.action_nd_array[:] = np.array([1, mcs, prb], dtype=np.int32)
         if (self.verbose == 1):
             print('{} - Act: {}'.format(str(self), action))
-        while self.result_nd_array[0] == 0:
-            pass
-        result = self.result_nd_array[1:]
-        self.result_nd_array[0] = 0
-
-        if (self.verbose == 1):
-            print('{} - Res: {}'.format(str(self), result))
-        
+        if (prb > 0):
+            while self.result_nd_array[0] == 0:
+                pass
+            result = self.result_nd_array[1:]
+            self.result_nd_array[0] = 0
+            if (self.verbose == 1):
+                print('{} - Res: {}'.format(str(self), result))
+        else:
+            result = True, 1, 0
+            if (self.verbose == 1):
+                print('{} - Res (not applicable)'.format(str(self), result))
         crc, decoding_time, tbs = result
-        result = self.reward(crc, decoding_time, tbs)
-        return None, result, True, {} 
+        reward = self.reward(crc, decoding_time, tbs)
+        return None, reward, True, {} 
+        
 
     def reset(self):
         while self.observation_nd_array[0] == 0:

@@ -14,6 +14,7 @@ REWARD_IN = '/tmp/return_in'
 class Coordinator():
     def __init__(self):
         self.total_agents = 8
+        self.verbose = 0
 
         # validity byte
         # observation is: noise, beta, bsr all are integers32
@@ -52,7 +53,7 @@ class Coordinator():
     def get_environment_config(self) -> Config:
         config = Config()
         config.seed = 1
-        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=0)
+        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose)
         config.num_episodes_to_run = 100e3
         config.save_results = True
         config.results_file_path = '/home/naposto/phd/nokia/data/csv_42/results.csv'
@@ -61,29 +62,29 @@ class Coordinator():
         config.save_weights_period = 100
         config.weights_file_path = '/home/naposto/phd/nokia/data/csv_42/weights.h5'
         
-        config.load_initial_weights = False
+        config.load_initial_weights = True
         config.initial_weights_path = '/home/naposto/phd/nokia/data/csv_41/beta_all_noise_all_entropy_0.1_model.h5'
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
                 'learning_rate': 1e-4,
-                # 'linear_hidden_units': [5, 32, 64, 100],
-                'linear_hidden_units': [5, 32],
+                'linear_hidden_units': [5, 32, 64, 100],
+                # 'linear_hidden_units': [5, 32],
                 'num_actor_outputs': 2,
                 'final_layer_activation': ['softmax', 'softmax', None],
                 'normalise_rewards': False,
                 'add_extra_noise': False,
-                'batch_size': 512,
+                'batch_size': 64,
                 'include_entropy_term': True,
                 'local_update_period': 10, # in episodes
                 'entropy_beta': 0.1,
                 'Actor': {
-                    # 'linear_hidden_units': [100, 40]
-                    'linear_hidden_units': [25]
+                    'linear_hidden_units': [100, 40]
+                    # 'linear_hidden_units': [25]
                 },
                 'Critic': {
-                    # 'linear_hidden_units': [16, 4]
-                    'linear_hidden_units': [3]
+                    'linear_hidden_units': [16, 4]
+                    # 'linear_hidden_units': [3]
                 }
             }
         }
@@ -128,7 +129,8 @@ class Coordinator():
 
                         result_buffer = [crc, dec_time, dec_bits]
                         agent_idx = tti % self.total_agents
-                        # print('Res {} - {}'.format(agent_idx, result_buffer))
+                        if (self.verbose == 1):
+                            print('Res {} - {}'.format(agent_idx, result_buffer))
                         self.reward_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *result_buffer], dtype=np.int32)
             except FileNotFoundError as e:
                 pass
@@ -173,7 +175,8 @@ class Coordinator():
                             
                             agent_idx = tti % self.total_agents
                             observation = [noise, beta, bsr]
-                            # print('Obs {} - {}'.format(agent_idx, observation))
+                            if (self.verbose == 1):
+                                print('Obs {} - {}'.format(agent_idx, observation))
                             self.observation_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *observation], dtype=np.int32)
 
                             while self.action_nd_array[agent_idx * 3]  == 0:
@@ -181,7 +184,8 @@ class Coordinator():
 
                             self.action_nd_array[agent_idx * 3 ] = 0
                             mcs, prb = self.action_nd_array[agent_idx * 3 + 1].item(), self.action_nd_array[agent_idx * 3 + 2].item()
-                            # print('Act {} - {}'.format(agent_idx, [mcs, prb]))
+                            if (self.verbose == 1):
+                                print('Act {} - {}'.format(agent_idx, [mcs, prb]))
 
                             action_mcs = mcs.to_bytes(1, byteorder="little")
                             action_prb = prb.to_bytes(1, byteorder="little")

@@ -213,15 +213,10 @@ class A3CAgent(BaseAgent):
                 try:
                     gradients = gradient_updates_queue.get(block = True, timeout = 10)
                     clipped_gradients = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients]
+                    actor_critic_optimizer.apply_gradients(
+                        zip(clipped_gradients, self.global_model.trainable_weights)
+                    )
                     with self.optimizer_lock:
-                        actor_critic_optimizer.apply_gradients(
-                            zip(clipped_gradients, self.global_model.trainable_weights)
-                        )
-                        for weight in self.global_model.get_weights():
-                            if (np.isnan(weight).any()):
-                                print('Master has a model with weights with nan elements')
-                                self.save_weights(self.config.weights_file_path)
-                                break
                         A3CAgent.publish_weights_to_shared_memory(self.global_model.get_weights(), self.shared_weights_array)
 
                     gradient_calculation_idx += 1
@@ -363,7 +358,7 @@ class Actor_Critic_Worker(mp.Process):
                             for logp_mcs, logp_prb, mcs, prb in zip(batch_logp_mcs, batch_logp_prb, batch_action_mcs, batch_action_prb)],
                             dtype = tf.float32), axis = 1)
 
-                    actor_loss = joint_action_logp
+                    actor_loss_inside_term = joint_action_logp * advantage
                     if (self.include_entropy_term):
                         joint_prob = tf.linalg.matmul(
                             batch_p_mcs, batch_p_prb, 
@@ -371,22 +366,23 @@ class Actor_Critic_Worker(mp.Process):
                         
                         plogp = tf.math.xlogy(joint_prob, joint_prob, name = 'plogp')
                         entropy = -1 * tf.expand_dims(tf.reduce_sum(plogp, axis = [1, 2], name = 'batch_entropy'), axis = 1)
-                        actor_loss += entropy
+                        actor_loss_inside_term += self.entropy_beta * entropy
 
-                    actor_loss = -1 * actor_loss
+                    actor_loss = -1 * actor_loss_inside_term
 
                     actor_loss_mean = tf.reduce_mean(actor_loss)
                     critic_loss_mean = tf.reduce_mean(critic_loss)
                     
                     total_loss = actor_loss_mean + critic_loss_mean                    
-
+                gradients = tape.gradient(total_loss, self.local_model.trainable_weights)
+                self.gradient_updates_queue.put(gradients)
+                
                 rew_mean = np.mean(self.batch_rewards)
                 entropy_mean = np.mean(entropy)
                 mcs_mean = tf.reduce_sum(tf.reduce_mean(batch_p_mcs, axis = 0) * MCS_SPACE).numpy()
                 prb_mean = tf.reduce_sum(tf.reduce_mean(batch_p_prb, axis = 0) * PRB_SPACE).numpy()
                 
 
-                self.put_gradients_in_queue(tape, total_loss)
                 with self.counter.get_lock():
                     self.counter.value += 1
                     self.results_queue.put([self.worker_num, rew_mean, entropy_mean, mcs_mean, prb_mean, actor_loss_mean.numpy(), critic_loss_mean.numpy()])
@@ -422,19 +418,6 @@ class Actor_Critic_Worker(mp.Process):
         actor_output_log_probs = [tf.math.log(output) for output in actor_output_probs]
         actor_samples = [tf.random.categorical(output, num_samples = 1) for output in actor_output_log_probs]
         action = [actor_sample[0][0].numpy() for actor_sample in actor_samples]
-        return action, actor_output_probs, actor_output_log_probs, critic_output
-
-    def put_gradients_in_queue(self, tape, total_loss):
-        gradients = tape.gradient(total_loss, self.local_model.trainable_weights)
-        
-        for gradient in gradients:
-            if (np.isnan(gradient).any()):
-                print('worker {} has gradients with nan elements'.format(self.worker_num))
-                break
-
-
-        self.gradient_updates_queue.put(gradients)
-
-        
+        return action, actor_output_probs, actor_output_log_probs, critic_output   
 
 
