@@ -3,6 +3,8 @@ from env.SrsRanEnv import SrsRanEnv
 import multiprocessing as mp
 from Config import Config
 from A3CAgent import A3CAgent
+from multiprocessing import shared_memory
+import numpy as np
 
 
 ACTOR_IN = '/tmp/actor_in'
@@ -13,11 +15,34 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
 
-        self.obs_q = [mp.Queue(maxsize=1) for _ in range(self.total_agents)]
-        self.rew_q = [mp.Queue(maxsize=1) for _ in range(self.total_agents)]
-        self.act_q = mp.Queue(maxsize=1)
+        # validity byte
+        # observation is: noise, beta, bsr all are integers32
+        try:
+            shm_observation = shared_memory.SharedMemory(create = True,  name = 'observation', size = (16) * self.total_agents)
+        except Exception:
+            shm_observation = shared_memory.SharedMemory(create = False, name = 'observation', size = (16) * self.total_agents)
+
+        nd_array = np.ndarray(shape=(4 * self.total_agents), dtype=np.int32, buffer=shm_observation.buf)
+        nd_array[:] = np.full(shape=(4 * self.total_agents), fill_value=0)
+
+        try:
+            shm_action = shared_memory.SharedMemory(create = True,  name = 'action', size = (12) * self.total_agents)
+        except Exception:
+            shm_action = shared_memory.SharedMemory(create = False, name = 'action', size = (12) * self.total_agents)
+
+        nd_array = np.ndarray(shape=(3 * self.total_agents), dtype=np.int32, buffer=shm_action.buf)
+        nd_array[:] = np.full(shape=(3 * self.total_agents), fill_value=0)
+
+        try:
+            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (16) * self.total_agents)
+        except Exception:
+            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (16) * self.total_agents)    
+
+        nd_array = np.ndarray(shape=(4 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
+        nd_array[:] = np.full(shape=(4 * self.total_agents), fill_value=0)                
 
         self.config = self.get_environment_config()
+        self.processes_started_successfully = mp.Value('i', 0)
         
         self.a3c_agent = A3CAgent(self.config, self.total_agents)
 
@@ -27,7 +52,7 @@ class Coordinator():
     def get_environment_config(self) -> Config:
         config = Config()
         config.seed = 1
-        config.environment = SrsRanEnv(title = 'SRS RAN Environment')
+        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=0)
         config.num_episodes_to_run = 100e3
         config.save_results = True
         config.results_file_path = '/home/naposto/phd/nokia/data/csv_42/results.csv'
@@ -36,26 +61,29 @@ class Coordinator():
         config.save_weights_period = 100
         config.weights_file_path = '/home/naposto/phd/nokia/data/csv_42/weights.h5'
         
-        config.load_initial_weights = True
+        config.load_initial_weights = False
         config.initial_weights_path = '/home/naposto/phd/nokia/data/csv_41/beta_all_noise_all_entropy_0.1_model.h5'
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
                 'learning_rate': 1e-4,
-                'linear_hidden_units': [5, 32, 64, 100],
+                # 'linear_hidden_units': [5, 32, 64, 100],
+                'linear_hidden_units': [5, 32],
                 'num_actor_outputs': 2,
                 'final_layer_activation': ['softmax', 'softmax', None],
                 'normalise_rewards': False,
                 'add_extra_noise': False,
-                'batch_size': 64,
+                'batch_size': 512,
                 'include_entropy_term': True,
-                'local_update_period': 1, # in episodes
+                'local_update_period': 10, # in episodes
                 'entropy_beta': 0.1,
                 'Actor': {
-                    'linear_hidden_units': [100, 40]
+                    # 'linear_hidden_units': [100, 40]
+                    'linear_hidden_units': [25]
                 },
                 'Critic': {
-                    'linear_hidden_units': [16, 4]
+                    # 'linear_hidden_units': [16, 4]
+                    'linear_hidden_units': [3]
                 }
             }
         }
@@ -65,7 +93,7 @@ class Coordinator():
     def start(self):
         self.sched_proc.start()
         self.decod_proc.start()
-        self.a3c_agent.run_n_episodes(self.obs_q, self.act_q, self.rew_q)
+        self.a3c_agent.run_n_episodes(self.processes_started_successfully)
         self.sched_proc.join()
         self.decod_proc.join()
 
@@ -73,6 +101,15 @@ class Coordinator():
         return 
 
     def rcv_return_func(self):
+        shm_reward = shared_memory.SharedMemory(create = False,  name = 'result')
+        self.reward_nd_array = np.ndarray(
+            shape=(4 * self.total_agents),
+            dtype= np.int32,
+            buffer = shm_reward.buf
+        )
+        while (self.processes_started_successfully.value == 0):
+            pass
+        print('Receive result thread waiting for all processes to start...OK')
         is_file_open = False
         while (not is_file_open):
             try:
@@ -89,16 +126,34 @@ class Coordinator():
                         crc = int.from_bytes(content[8:9], "little")
                         dec_bits = int.from_bytes(content[12:], "little")
 
-                        reward_buffer = [crc, dec_time, dec_bits]
-                        print('Rew {} - {}'.format(tti, [tti % 8 , *reward_buffer]))
+                        result_buffer = [crc, dec_time, dec_bits]
                         agent_idx = tti % self.total_agents
-                        self.rew_q[agent_idx].put(reward_buffer)
+                        # print('Res {} - {}'.format(agent_idx, result_buffer))
+                        self.reward_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *result_buffer], dtype=np.int32)
             except FileNotFoundError as e:
                 pass
                 
 
 
     def rcv_obs_send_act_func(self):
+        shm_observation = shared_memory.SharedMemory(create = False,  name = 'observation')
+        shm_action = shared_memory.SharedMemory(create = False,  name = 'action')
+
+        self.observation_nd_array = np.ndarray(
+            shape=(4 * self.total_agents), 
+            dtype= np.int32, 
+            buffer = shm_observation.buf)
+
+        
+        self.action_nd_array = np.ndarray(
+            shape=(3 * self.total_agents),
+            dtype= np.int32,
+            buffer = shm_action.buf
+        )
+
+        while (self.processes_started_successfully.value == 0):
+            pass
+        print('Receive obs thread waiting for all processes to start... OK')
         is_actor_in_open = False
         while (not is_actor_in_open):
             try:                
@@ -116,13 +171,17 @@ class Coordinator():
                             noise =  int.from_bytes(content[8:12], "little", signed = True)
                             beta = int.from_bytes(content[12:], "little")
                             
-                            observation = [noise, beta, bsr]
-                            print('Obs {} - {}'.format(tti, [tti % 8, *observation]))
-
                             agent_idx = tti % self.total_agents
-                            self.obs_q[agent_idx].put(observation)
+                            observation = [noise, beta, bsr]
+                            # print('Obs {} - {}'.format(agent_idx, observation))
+                            self.observation_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *observation], dtype=np.int32)
 
-                            mcs, prb = self.act_q.get(block=True)
+                            while self.action_nd_array[agent_idx * 3]  == 0:
+                                pass
+
+                            self.action_nd_array[agent_idx * 3 ] = 0
+                            mcs, prb = self.action_nd_array[agent_idx * 3 + 1].item(), self.action_nd_array[agent_idx * 3 + 2].item()
+                            # print('Act {} - {}'.format(agent_idx, [mcs, prb]))
 
                             action_mcs = mcs.to_bytes(1, byteorder="little")
                             action_prb = prb.to_bytes(1, byteorder="little")

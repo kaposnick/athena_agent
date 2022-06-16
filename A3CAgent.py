@@ -24,7 +24,7 @@ class A3CAgent(BaseAgent):
         super(A3CAgent, self).__init__(config)  
         self.num_processes = num_processes
 
-    def run_n_episodes(self, inp_obs_queues, out_act_queue, inp_rew_queues):
+    def run_n_episodes(self, processes_started_successfully):
         results_queue = mp.Queue()
         gradient_updates_queue = mp.Queue()
         results_queue = mp.Queue()
@@ -75,19 +75,20 @@ class A3CAgent(BaseAgent):
             print('Optimizer thread started successfully')
             for process_num in range(self.num_processes):
                 worker_environment = copy.deepcopy(self.environment)
-                worker_environment.set_queues(
-                    input_observation_queue = inp_obs_queues[process_num],
-                    output_action_queue     = out_act_queue,
-                    input_reward_queue      = inp_rew_queues[process_num]
-                )
+                successfully_started_worker = mp.Value('i', 0)
                 worker = Actor_Critic_Worker(process_num, 
+                                            self.num_processes,
+                                            successfully_started_worker,
                                             worker_environment, self.optimizer_lock,
                                             self.config, episodes_per_process, 
                                             self.state_size, self.action_size, self.action_types, 
                                             results_queue, gradient_updates_queue, episode_number)
                 worker.start()
+                while (successfully_started_worker.value == 0):
+                    pass
                 processes.append(worker)
 
+            processes_started_successfully.value = 1
             if (self.config.save_results):
                 self.save_results(save_file, episode_number, results_queue)
             for worker in processes:
@@ -256,13 +257,15 @@ COLUMNS = [
 ] 
 
 class Actor_Critic_Worker(mp.Process):
-    def __init__(self, worker_num, environment, optimizer_lock, 
+    def __init__(self, worker_num, total_workers, successfully_started_worker, environment, optimizer_lock, 
                  config, episodes_to_run, state_size, action_size, action_types, results_queue, gradient_updates_queue,
                  episode_number) -> None:
         super(Actor_Critic_Worker, self).__init__()
         self.environment = environment
         self.config = config
         self.worker_num = worker_num
+        self.total_workers = total_workers
+        self.successfully_started_worker = successfully_started_worker
 
         self.state_size = state_size
         self.action_size = action_size
@@ -306,6 +309,8 @@ class Actor_Critic_Worker(mp.Process):
             self.global_weights = A3CAgent.map_weights_to_shared_memory(
                                 self.local_model.get_weights(), self.shared_weights_array)
 
+            self.environment.setup(self.worker_num, self.total_workers)
+            self.successfully_started_worker.value = 1
             import time
             for ep_ix in range(self.episodes_to_run):
                 if (ep_ix % 1 == 0):

@@ -1,3 +1,4 @@
+from multiprocessing import shared_memory
 import gym
 from gym import spaces
 import numpy as np
@@ -35,12 +36,20 @@ class SrsRanEnv():
         n_actions = (len(MCS_SPACE), len(PRB_SPACE))        
         self.action_space = spaces.MultiDiscrete(n_actions)
 
-    def set_queues(self, input_observation_queue, 
-                         output_action_queue, 
-                         input_reward_queue):
-        self.observation_queue = input_observation_queue
-        self.action_queue = output_action_queue
-        self.reward_queue = input_reward_queue
+    def setup(self, agent_idx, total_agents):
+        self.shm_observation = shared_memory.SharedMemory(create=False, name='observation')
+        observation_nd_array = np.ndarray(shape=(4 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
+        self.observation_nd_array = observation_nd_array[agent_idx * 4: (agent_idx+1)*4]
+
+        self.shm_action = shared_memory.SharedMemory(create=False, name='action')
+        action_nd_array = np.ndarray(shape=(3 * total_agents), dtype=np.int32, buffer = self.shm_action.buf)
+        self.action_nd_array = action_nd_array[agent_idx * 3: (agent_idx + 1) * 3]
+
+        self.shm_reward = shared_memory.SharedMemory(create=False, name='result')
+        result_nd_array = np.ndarray(shape=(4 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
+        self.result_nd_array = result_nd_array[agent_idx * 4: (agent_idx + 1) * 4]
+
+        self.title = 'worker_{}'.format(agent_idx)
 
     def get_environment_title(self):
         return self.title
@@ -61,17 +70,27 @@ class SrsRanEnv():
         
     def step(self, action):        
         mcs, prb = self.translate_action(action)
-        self.action_queue.put([mcs, prb])
-        reward = self.reward_queue.get(block = True)
+        self.action_nd_array[:] = np.array([1, mcs, prb], dtype=np.int32)
+        if (self.verbose == 1):
+            print('{} - Act: {}'.format(str(self), action))
+        while self.result_nd_array[0] == 0:
+            pass
+        result = self.result_nd_array[1:]
+        self.result_nd_array[0] = 0
 
         if (self.verbose == 1):
-            print('{} - Rew: {}'.format(str(self), reward))
+            print('{} - Res: {}'.format(str(self), result))
         
-        crc, decoding_time, tbs = reward
+        crc, decoding_time, tbs = result
         result = self.reward(crc, decoding_time, tbs)
         return None, result, True, {} 
 
     def reset(self):
-        self.observation = self.observation_queue.get(block = True) # noise, beta, bsr
+        while self.observation_nd_array[0] == 0:
+            pass
+        self.observation = self.observation_nd_array[1:]
+        if (self.verbose == 1):
+            print('{} - Obs: {}'.format(str(self), self.observation))
+        self.observation_nd_array[0] = 0
         return self.observation
         
