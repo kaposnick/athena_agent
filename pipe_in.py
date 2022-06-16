@@ -90,7 +90,7 @@ class Coordinator():
                         dec_bits = int.from_bytes(content[12:], "little")
 
                         reward_buffer = [crc, dec_time, dec_bits]
-                        print('Rew {}'.format([tti, *reward_buffer]))
+                        print('Rew {} - {}'.format(tti, [tti % 8 , *reward_buffer]))
                         agent_idx = tti % self.total_agents
                         self.rew_q[agent_idx].put(reward_buffer)
             except FileNotFoundError as e:
@@ -117,7 +117,7 @@ class Coordinator():
                             beta = int.from_bytes(content[12:], "little")
                             
                             observation = [noise, beta, bsr]
-                            print('Obs {}'.format([tti, *observation]))
+                            print('Obs {} - {}'.format(tti, [tti % 8, *observation]))
 
                             agent_idx = tti % self.total_agents
                             self.obs_q[agent_idx].put(observation)
