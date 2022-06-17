@@ -54,20 +54,20 @@ class Coordinator():
         config = Config()
         config.seed = 1
         config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose)
-        config.num_episodes_to_run = 100e3
+        config.num_episodes_to_run = 1e3
         config.save_results = True
-        config.results_file_path = '/home/naposto/phd/nokia/data/csv_42/results.csv'
+        config.results_file_path = '/home/naposto/phd/nokia/data/csv_42/results_wo_pretrained.csv'
 
         config.save_weights = True
         config.save_weights_period = 100
-        config.weights_file_path = '/home/naposto/phd/nokia/data/csv_42/weights.h5'
+        config.weights_file_path = '/home/naposto/phd/nokia/data/csv_42/weights_wo_pretrained.h5'
         
-        config.load_initial_weights = True
+        config.load_initial_weights = False
         config.initial_weights_path = '/home/naposto/phd/nokia/data/csv_41/beta_all_noise_all_entropy_0.1_model.h5'
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
-                'learning_rate': 1e-4,
+                'learning_rate': 1e-3,
                 'linear_hidden_units': [5, 32, 64, 100],
                 # 'linear_hidden_units': [5, 32],
                 'num_actor_outputs': 2,
@@ -75,9 +75,10 @@ class Coordinator():
                 'normalise_rewards': False,
                 'add_extra_noise': False,
                 'batch_size': 64,
+                'local_update_period': 1, # in episodes
                 'include_entropy_term': True,
-                'local_update_period': 10, # in episodes
                 'entropy_beta': 0.1,
+                'entropy_contrib_prob': 0.995,
                 'Actor': {
                     'linear_hidden_units': [100, 40]
                     # 'linear_hidden_units': [25]

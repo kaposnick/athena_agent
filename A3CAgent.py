@@ -216,6 +216,13 @@ class A3CAgent(BaseAgent):
                     actor_critic_optimizer.apply_gradients(
                         zip(clipped_gradients, self.global_model.trainable_weights)
                     )
+
+                    for weight in self.global_model.get_weights():
+                        if (np.isnan(weight).any()):
+                            print('Global agent has weights with NaN elements')
+                            self.save_weights(self.config.save_weights_file)
+                            break
+
                     with self.optimizer_lock:
                         A3CAgent.publish_weights_to_shared_memory(self.global_model.get_weights(), self.shared_weights_array)
 
@@ -277,6 +284,7 @@ class Actor_Critic_Worker(mp.Process):
         self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
         if (self.include_entropy_term):            
             self.entropy_beta = self.config.hyperparameters['Actor_Critic_Common']['entropy_beta']
+            self.entropy_contrib_prob = self.config.hyperparameters['Actor_Critic_Common']['entropy_contrib_prob']
         
 
     def set_process_seeds(self, tf, worker_num):
@@ -366,7 +374,8 @@ class Actor_Critic_Worker(mp.Process):
                         
                         plogp = tf.math.xlogy(joint_prob, joint_prob, name = 'plogp')
                         entropy = -1 * tf.expand_dims(tf.reduce_sum(plogp, axis = [1, 2], name = 'batch_entropy'), axis = 1)
-                        actor_loss_inside_term += self.entropy_beta * entropy
+                        entropy_contribution = np.random.binomial(1, np.power(self.entropy_contrib_prob, ep_ix))
+                        actor_loss_inside_term += entropy_contribution * self.entropy_beta * entropy
 
                     actor_loss = -1 * actor_loss_inside_term
 
@@ -375,6 +384,18 @@ class Actor_Critic_Worker(mp.Process):
                     
                     total_loss = actor_loss_mean + critic_loss_mean                    
                 gradients = tape.gradient(total_loss, self.local_model.trainable_weights)
+
+                for weight in self.local_model.get_weights():
+                        if (np.isnan(weight).any()):
+                            print('Local agent {} has weights with NaN elements'.format(self.worker_num))
+                            break
+
+                for gradient in gradients:
+                        if (np.isnan(gradient).any()):
+                            print('Local agent {} has gradient with NaN elements'.format(self.worker_num))
+                            break
+
+
                 self.gradient_updates_queue.put(gradients)
                 
                 rew_mean = np.mean(self.batch_rewards)
@@ -415,7 +436,7 @@ class Actor_Critic_Worker(mp.Process):
         actor_output_probs = model_output[:len(self.action_size)] # normalized probs
         critic_output = model_output[-1]
 
-        actor_output_log_probs = [tf.math.log(output) for output in actor_output_probs]
+        actor_output_log_probs = [tf.math.log(output + 1e-10) for output in actor_output_probs]
         actor_samples = [tf.random.categorical(output, num_samples = 1) for output in actor_output_log_probs]
         action = [actor_sample[0][0].numpy() for actor_sample in actor_samples]
         return action, actor_output_probs, actor_output_log_probs, critic_output   
