@@ -338,8 +338,8 @@ class Actor_Critic_Worker(mp.Process):
                         state = self.reset_game_for_worker()
                         done = False
                         while not done:
-                            action, action_p, action_logp, critic_output = self.pick_action_and_get_critic_values(self.local_model, state, tf)
-                            next_state, reward, done, _ = self.environment.step(action)
+                            action, action_logp, critic_output = self.pick_action_and_get_critic_values(self.local_model, state, tf)
+                            next_state, reward, done, info = self.environment.step(action)
                             
                             self.batch_action_mcs.append(action[0])
                             self.batch_action_prb.append(action[1])
@@ -440,6 +440,6 @@ class Actor_Critic_Worker(mp.Process):
         actor_output_log_probs = [tf.math.log(output + 1e-10) for output in actor_output_probs]
         actor_samples = [tf.random.categorical(output, num_samples = 1) for output in actor_output_log_probs]
         action = [actor_sample[0][0].numpy() for actor_sample in actor_samples]
-        return action, actor_output_probs, actor_output_log_probs, critic_output   
+        return action, actor_output_log_probs, critic_output   
 
 

@@ -1,7 +1,10 @@
 from multiprocessing import shared_memory
+from tokenize import Number
 import gym
 from gym import spaces
 import numpy as np
+
+from agents.env.DecoderEnv import BaseEnv
 
 PROHIBITED_COMBOS = [(0, 1), (0, 2), (0,3), 
                   (1, 0), (1, 1),
@@ -16,27 +19,22 @@ PRB_SPACE = np.array(
                       30, 32, 36, 40, 45], dtype = np.float16)
 MCS_SPACE = np.arange(0, 25,  dtype=np.float16)
 
-class SrsRanEnv():
+class SrsRanEnv(BaseEnv):
     def __init__(self,
-                 title,
-                 verbose = 0,
-                 penalty = 15) -> None:
-        super(SrsRanEnv, self).__init__()
-        self.penalty = penalty
-        self.title = title
-        self.verbose = verbose
-
-        # Define a 1-D observation space
-        self.observation_shape = (3,)
-        self.observation_space = spaces.Box(
-                            low  = np.zeros(self.observation_shape),
-                            high = np.zeros(self.observation_shape), 
-                            dtype = np.float32)       
-        
-        n_actions = (len(MCS_SPACE), len(PRB_SPACE))        
-        self.action_space = spaces.MultiDiscrete(n_actions)
+                input_dims = 3,
+                penalty = 15,
+                policy_output_format = "mcs_prb_independent",
+                title = "srsRAN Environment",
+                verbose = 0) -> None:
+        super(SrsRanEnv, self).__init__(
+            input_dims = input_dims,
+            penalty = penalty,
+            policy_output_format = policy_output_format,
+            title = title, 
+            verbose = verbose)
 
     def setup(self, agent_idx, total_agents):
+        super().setup(agent_idx, total_agents)
         self.shm_observation = shared_memory.SharedMemory(create=False, name='observation')
         observation_nd_array = np.ndarray(shape=(4 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
         self.observation_nd_array = observation_nd_array[agent_idx * 4: (agent_idx+1)*4]
@@ -49,27 +47,9 @@ class SrsRanEnv():
         result_nd_array = np.ndarray(shape=(4 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
         self.result_nd_array = result_nd_array[agent_idx * 4: (agent_idx + 1) * 4]
 
-        self.title = 'worker_{}'.format(agent_idx)
-
-    def get_environment_title(self):
-        return self.title
-
-    def __str__(self) -> str:
-        return self.get_environment_title()
-    
-    def translate_action(self, action):
-        return int(MCS_SPACE[action[0]]), int(PRB_SPACE[action[1]])
-
-    def reward(self, crc, decoding_time, tbs):
-        reward = 0
-        if (crc == True and decoding_time <= 3000):
-            reward = tbs / (8 * 1024) # in KBs
-        else:
-            reward = -1 * self.penalty
-        return reward
         
     def step(self, action):        
-        mcs, prb = self.translate_action(action)
+        mcs, prb = super().translate_action(action)
         self.action_nd_array[:] = np.array([1, mcs, prb], dtype=np.int32)
         if (self.verbose == 1):
             print('{} - Act: {}'.format(str(self), action))
@@ -85,16 +65,16 @@ class SrsRanEnv():
             if (self.verbose == 1):
                 print('{} - Res (not applicable)'.format(str(self), result))
         crc, decoding_time, tbs = result
-        reward = self.reward(crc, decoding_time, tbs)
-        return None, reward, True, {} 
+        reward = super().get_reward(mcs, prb, crc, decoding_time)
+        return super().get_agent_result(reward, mcs, prb, crc, decoding_time)
         
 
     def reset(self):
         while self.observation_nd_array[0] == 0:
             pass
-        self.observation = self.observation_nd_array[1:]
+        super().set_observation(self.observation_nd_array[1:][:self.input_dims])
         if (self.verbose == 1):
             print('{} - Obs: {}'.format(str(self), self.observation))
         self.observation_nd_array[0] = 0
-        return self.observation
+        return super().get_observation()
         

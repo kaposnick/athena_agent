@@ -1,5 +1,6 @@
 import logging
 import os
+import gym
 import numpy as np
 
 import time
@@ -17,7 +18,7 @@ class BaseAgent(object):
         self.action_size = self.get_action_size()
         self.config.action_size = self.action_size
         
-        self.state_size = self.get_state_size()
+        self.state_size = self.environment.get_state_size()
         self.config.state_size = self.state_size
         
         self.episode_number = 0
@@ -34,15 +35,13 @@ class BaseAgent(object):
         num_actor_outputs = ac_common_params['num_actor_outputs']
         final_layer_activation = ac_common_params['final_layer_activation']
         
-        inputs = layers.Input(shape = (input_dim), name = 'input_layer')
-
-        input_normalization = \
-            layers.Normalization(
-                axis = -1, 
-                mean = np.array([NOISE_MIN, BETA_MIN, BSR_MIN], dtype=np.float32), 
-                variance = np.power(np.array([NOISE_MAX - NOISE_MIN, 
+        mean = np.array([NOISE_MIN, BETA_MIN, BSR_MIN], dtype=np.float32)[:input_dim]
+        variance = np.power(np.array([NOISE_MAX - NOISE_MIN, 
                                               BETA_MAX - BETA_MIN, 
-                                              BSR_MAX - BSR_MIN], dtype=np.float32) , 2)) (inputs)
+                                              BSR_MAX - BSR_MIN], dtype=np.float32) , 2)[:input_dim]
+
+        inputs = layers.Input(shape = (input_dim), name = 'input_layer')
+        input_normalization = layers.Normalization(axis = -1, mean = mean, variance = variance) (inputs)
 
         common = None
         for neurons in ac_common_hidden_units:
@@ -94,11 +93,14 @@ class BaseAgent(object):
         raise ValueError("Step needs to be implemented by the agent")
 
     def get_state_size(self):
-        random_state = self.environment.reset()
-        return len(random_state)
+        return self.environment.get_state_size()
 
-    def get_action_size(self):
-        return self.environment.action_space.nvec
+    def get_action_size(self) -> np.ndarray:
+        env_type = type(self.environment.action_space)
+        if (env_type == gym.spaces.Discrete):
+            return np.array([self.environment.action_space.n], dtype=np.int32)
+        elif (env_type == gym.spaces.MultiDiscrete):
+            return self.environment.action_space.nvec
 
     def track_episodes_data(self):
         self.episode_states.append(self.state)

@@ -1,15 +1,16 @@
 import json
+from tokenize import Number
 import gym
 
 from gym import spaces
 from common_utils import import_tensorflow
 import numpy as np
 
-NOISE_MIN = 10.0
+NOISE_MIN = -15.0
 NOISE_MAX = 100.0
 BETA_MIN  = 1.0
 BETA_MAX  = 700.0
-BSR_MIN   = 120e3
+BSR_MIN   = 0
 BSR_MAX   = 180e3
 
 PROHIBITED_COMBOS = [(0, 1), (0, 2), (0,3), 
@@ -26,68 +27,59 @@ PRB_SPACE = np.array(
 MCS_SPACE = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 ,24],  dtype=np.float16)  
 
 I_MCS_TO_I_TBS = np.array([0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 10, 11, 12, 13,
-                            14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26]);
+                            14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
-class DecoderEnv(gym.Env):
+class BaseEnv(gym.env):
     def __init__(self, 
-                 decoder_model_path,
-                 tbs_table_path, 
-                 noise_range = None, 
-                 beta_range  = None,
-                 bsr_range   = None,
-                 penalty = 15,
-                 title = 'LTE Turbo Decoder') -> None:
-        super(DecoderEnv, self).__init__()
-        self.decoder_model_path = decoder_model_path
-        self.tbs_table_path = tbs_table_path
+                input_dims: Number, 
+                penalty: Number,
+                policy_output_format: str,
+                title: str, 
+                verbose: Number) -> None:
+        super(BaseEnv, self).__init__()
         self.penalty = penalty
+        self.policy_output_format = policy_output_format
         self.title = title
-
-        if noise_range is not None:
-            assert noise_range[0] >= NOISE_MIN and noise_range[1] <= NOISE_MAX
-            self.noise_min = noise_range[0]
-            self.noise_max = noise_range[1]
-        else:
-            self.noise_min = NOISE_MIN
-            self.noise_max = NOISE_MAX
-
-        if beta_range is not None:
-            assert beta_range[0] >= BETA_MIN and beta_range[1] <= BETA_MAX
-            self.beta_min = beta_range[0]
-            self.beta_max = beta_range[1]
-        else:
-            self.beta_min = BETA_MIN
-            self.beta_max = BETA_MAX
-
-        if bsr_range is not None:
-            self.bsr_min  = bsr_range[0]
-            self.bsr_max  = bsr_range[1]
-        else:
-            self.bsr_min  = BSR_MIN
-            self.bsr_max  = BSR_MAX
-
-        # Define a 1-D observation space
-        self.observation_shape = (3,)
+        self.verbose = verbose
+        self.observation_shape = (input_dims, )
         self.observation_space = spaces.Box(
-                            low  = np.zeros(self.observation_shape),
-                            high = np.zeros(self.observation_shape), 
-                            dtype = np.float32)
+            low = np.zeros(self.observation_shape),
+            high = np.zeros(self.observation_shape),
+            dtype = np.float32
+        )
 
-        
-        
-        n_actions = (len(MCS_SPACE), len(PRB_SPACE))
-        
-        self.action_space = spaces.MultiDiscrete(n_actions)
+        if (self.policy_output_format == "mcs_prb_joint"):
+            self.action_array = []
+            for mcs in MCS_SPACE:
+                for prb in PRB_SPACE:
+                    if (mcs, prb) in PROHIBITED_COMBOS:
+                        continue
+                    self.action_array.append( (mcs, prb) )
+            self.action_space = spaces.Discrete(len(self.action_array))
+            self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
+
+        elif (self.policy_output_format == "mcs_prb_independent"):
+            n_actions = (len(MCS_SPACE), len(PRB_SPACE))
+            self.action_space = spaces.MultiDiscrete(n_actions)
+            self.fn_action_translation = self.fn_mcs_prb_indpendent_action_translation
+        else:
+            raise Exception("Not allowed policy output format: " + str(self.policy_output_format))
 
     def setup(self, agent_idx, total_agents):
-        self.title = 'worker_{}'.format(agent_idx)
+        self.set_title('worker_{}'.format(agent_idx))
 
-    def get_environment_title(self):
+    def get_state_size(self):
+        return self.observation_shape[0]
+
+    def set_title(self, title):
+        self.title = title
+
+    def get_title(self):
         return self.title
 
-    def translate_action(self, action):
-        return MCS_SPACE[action[0]], PRB_SPACE[action[1]]
-
+    def set_observation(self, observation):
+        self.observation = observation
+    
     def get_observation(self):
         return self.observation
 
@@ -96,49 +88,104 @@ class DecoderEnv(gym.Env):
         if (prb > 0):
             i_tbs = I_MCS_TO_I_TBS[mcs]
             tbs = self.tbs_table[i_tbs][prb - 1]
-        return tbs
+        return tbs 
 
-    def reward(self, mcs, prb, crc, decoding_time):
+    def get_reward(self, mcs, prb, crc, decoding_time, tbs = None):
         reward = 0
-        if ( (mcs, prb) in PROHIBITED_COMBOS):
+        if ( self.policy_output_format == "mcs_prb_independent" and (mcs, prb) in PROHIBITED_COMBOS):
             reward = -1 * self.penalty
         else:
             if (crc == True and decoding_time <= 3000):
-                reward = self.to_tbs(mcs, prb) / (8 * 1024) # in KBs
+                if (tbs is None):
+                    tbs = self.to_tbs(mcs, prb) # in KBs
+                reward = tbs / ( 8 * 1024)
             else:
                 reward = -1 * self.penalty
         return reward
-        
-    def step(self, action):
-        if (not hasattr(self, 'decoder_model')):
-            self.tf, _ = import_tensorflow('3')
-            self.decoder_model = self.tf.keras.models.load_model(self.decoder_model_path, compile = False)
 
-        if (not hasattr(self, 'tbs_table')):
-            with open(self.tbs_table_path) as tbs_json:
-                self.tbs_table = json.load(tbs_json)
+    def get_agent_result(self, reward, mcs, prb, crc, decoding_time):
+        return None, reward, True, {'mcs': mcs, 'prb': prb, 'crc': crc, 'decoding_time': decoding_time}
 
+    def fn_mcs_prb_joint_action_translation(self, action) -> tuple:
+        # in this case action is [action_idx]
+        assert action >= 0 and action < len(self.action_array), 'Action {} not in range'.format(action)
+        return self.action_array[action]
+
+    def fn_mcs_prb_indpendent_action_translation(self, action) -> tuple:
+        # in this case action is [mcs_action_idx, prb_action_idx]
         action_mcs = action[0]
         action_prb = action[1]
         assert action_mcs >= 0 and action_mcs < len(MCS_SPACE), 'Action MCS {} not in range'.format(action_mcs)
         assert action_prb >= 0 and action_prb < len(PRB_SPACE), 'Action PRB {} not in range'.format(action_prb)
+        return int(MCS_SPACE[action_mcs]), int(PRB_SPACE[action_prb])
+
+    def translate_action(self, action) -> tuple:
+        return self.fn_action_translation(action)
+
+    def __str__(self) -> str:
+        return self.title
+
+class DecoderEnv(BaseEnv):
+    def __init__(self,
+                 decoder_model_path,
+                 tbs_table_path, 
+                 noise_range = [NOISE_MIN, NOISE_MAX], 
+                 beta_range  = [BETA_MIN,  BETA_MAX],
+                 bsr_range   = [BSR_MIN,   BSR_MAX],
+                 input_dims = 3,
+                 penalty = 15,
+                 policy_output_format = "mcs_prb_independent",
+                 title = 'Digital Twin Environment',
+                 verbose = 0) -> None:
+        super(DecoderEnv, self).__init__(
+            input_dims = input_dims,
+            penalty = penalty,
+            policy_output_format = policy_output_format,
+            title = title, 
+            verbose = verbose)
+        self.decoder_model_path = decoder_model_path
+        self.tbs_table_path = tbs_table_path
+
+        if noise_range is not None:
+            assert noise_range[0] >= NOISE_MIN and noise_range[1] <= NOISE_MAX
+        self.noise_range = noise_range
+
+        if beta_range is not None:
+            assert beta_range[0] >= BETA_MIN and beta_range[1] <= BETA_MAX
+        self.beta_range = beta_range
+
+        if bsr_range is not None:
+            assert bsr_range[0] >= BSR_MIN and bsr_range[1] <= BSR_MAX
+        self.bsr_range = bsr_range
+
+    def setup(self, agent_idx, total_agents):
+        super().setup(agent_idx, total_agents)
+        self.tf, _ = import_tensorflow('3')
+        self.decoder_model = self.tf.keras.models.load_model(self.decoder_model_path, compile = False)
+
+        with open(self.tbs_table_path) as tbs_json:
+            self.tbs_table = json.load(tbs_json)       
         
-        mcs, prb = self.translate_action(action)
-        noise, beta, bsr = self.get_observation()
-        decoder_input = self.tf.convert_to_tensor(np.array([[beta, prb, mcs, noise]], dtype=np.float32))
+    def step(self, action):        
+        mcs, prb = super().translate_action(action)
+        observation = self.get_observation() # noise, beta, bsr
+        decoder_input_array = np.array([[observation[0], prb, mcs, observation[1]]], dtype=np.float32)
+        decoder_input = self.tf.convert_to_tensor(decoder_input_array)
 
         # crc, decoding_time = self.decoder_model.predict(decoder_input, batch_size = 1)
         decode_prob, decoding_time = self.decoder_model(decoder_input, training = False)
         crc = np.random.binomial(n = 1, p = decode_prob)[0][0] 
-        reward = self.reward(int(mcs), int(prb), crc, decoding_time)
 
-        return None, reward, True, {} 
+        reward = super().get_reward(mcs, prb, crc, decoding_time)
+        return super().get_agent_result(reward, mcs, prb, crc, decoding_time)        
 
     def reset(self):
-        self.observation = (
-            np.random.uniform(low = self.noise_min,  high = self.noise_max),
-            np.random.uniform(low = self.beta_min ,  high = self.beta_max ), 
-            np.random.uniform(low = self.bsr_min  ,  high = self.bsr_max  )
+        super().set_observation( 
+            [
+                np.random.uniform(low = self.noise_range[0], high = self.noise_range[1]),
+                np.random.uniform(low = self.beta_range[0] , high = self.beta_range[1] ), 
+                np.random.uniform(low = self.bsr_range[0]  , high = self.bsr_range[1]  )
+            ][:self.input_dims]
         )
-        return self.observation
+        return super().get_observation()
         
