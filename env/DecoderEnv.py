@@ -79,6 +79,9 @@ class DecoderEnv(gym.Env):
         
         self.action_space = spaces.MultiDiscrete(n_actions)
 
+    def setup(self, agent_idx, total_agents):
+        self.title = 'worker_{}'.format(agent_idx)
+
     def get_environment_title(self):
         return self.title
 

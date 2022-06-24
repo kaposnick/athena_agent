@@ -6,10 +6,17 @@ import numpy as np
 import BaseAgent
 import multiprocessing as mp
 from BaseAgent import BaseAgent
-from agents.common_utils import import_tensorflow
-from agents.env.DecoderEnv import MCS_SPACE, PRB_SPACE
+from common_utils import import_tensorflow
+from env.SrsRanEnv import MCS_SPACE, PRB_SPACE
 
-from scripts.utils import COL_DT_AC_LOSS_MEAN, COL_DT_CR_LOSS_MEAN, COL_DT_ENTROPY_MEAN, COL_DT_MCS_MEAN, COL_DT_PRB_MEAN, COL_DT_REP, COL_DT_REWARD_MEAN, COL_DT_REWARD_SCALING, COL_DT_SIM, COLUMNS_DT_V1
+COL_DT_AC_LOSS_MEAN = 'ac_loss_mean'
+COL_DT_CR_LOSS_MEAN = 'cr_loss_mean'
+COL_DT_ENTROPY_MEAN = 'entropy'
+COL_DT_MCS_MEAN = 'mcs_mean'
+COL_DT_PRB_MEAN = 'prb_mean'
+COL_DT_REP = 'rep'
+COL_DT_REWARD_MEAN = 'reward_mean'
+COL_DT_SIM = 'sim'
 
 class A3CAgent(BaseAgent):
     agent_name = "A3C"
@@ -17,7 +24,7 @@ class A3CAgent(BaseAgent):
         super(A3CAgent, self).__init__(config)  
         self.num_processes = num_processes
 
-    def run_n_episodes(self):
+    def run_n_episodes(self, processes_started_successfully):
         results_queue = mp.Queue()
         gradient_updates_queue = mp.Queue()
         results_queue = mp.Queue()
@@ -30,7 +37,7 @@ class A3CAgent(BaseAgent):
         global_process_stop = mp.Value('i', 0)
         
         self.optimizer_lock = mp.Lock()
-        save_file = self.config.save_file
+        save_file = self.config.results_file_path
 
         if (self.config.num_episodes_to_run > 0):
             episodes_per_process = int(self.config.num_episodes_to_run / self.num_processes)
@@ -67,14 +74,21 @@ class A3CAgent(BaseAgent):
             
             print('Optimizer thread started successfully')
             for process_num in range(self.num_processes):
+                worker_environment = copy.deepcopy(self.environment)
+                successfully_started_worker = mp.Value('i', 0)
                 worker = Actor_Critic_Worker(process_num, 
-                                            copy.deepcopy(self.environment), self.optimizer_lock,
+                                            self.num_processes,
+                                            successfully_started_worker,
+                                            worker_environment, self.optimizer_lock,
                                             self.config, episodes_per_process, 
                                             self.state_size, self.action_size, self.action_types, 
                                             results_queue, gradient_updates_queue, episode_number)
                 worker.start()
                 processes.append(worker)
+            while (successfully_started_worker.value < 8):
+                pass
 
+            processes_started_successfully.value = 1
             if (self.config.save_results):
                 self.save_results(save_file, episode_number, results_queue)
             for worker in processes:
@@ -164,7 +178,7 @@ class A3CAgent(BaseAgent):
         exited_successfully = False
         try:
             learning_rate = hyperparameters['Actor_Critic_Common']['learning_rate']
-            tf, os = import_tensorflow('1')
+            tf, os = import_tensorflow('3')
             import queue
             os.environ['PYTHONHASHSEED'] = str(self.config.seed)
             random.seed(self.config.seed)
@@ -184,9 +198,9 @@ class A3CAgent(BaseAgent):
             self.shm, self.shared_weights_array = A3CAgent.get_shared_memory_ref(
                 memory_size_in_bytes.value,
                 model_dtype)
-            if (self.config.load_weights):
+            if (self.config.load_initial_weights):
                 print('Loading previous weights to continue training')
-                self.global_model.load_weights(self.config.weights_path)
+                self.global_model.load_weights(self.config.initial_weights_path)
             else:
                 print('Not loading any weights')
             A3CAgent.publish_weights_to_shared_memory(self.global_model.get_weights(), self.shared_weights_array)                
@@ -199,20 +213,22 @@ class A3CAgent(BaseAgent):
                 try:
                     gradients = gradient_updates_queue.get(block = True, timeout = 10)
                     clipped_gradients = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients]
+                    actor_critic_optimizer.apply_gradients(
+                        zip(clipped_gradients, self.global_model.trainable_weights)
+                    )
+
+                    for weight in self.global_model.get_weights():
+                        if (np.isnan(weight).any()):
+                            print('Global agent has weights with NaN elements')
+                            self.save_weights(self.config.save_weights_file)
+                            break
+
                     with self.optimizer_lock:
-                        actor_critic_optimizer.apply_gradients(
-                            zip(clipped_gradients, self.global_model.trainable_weights)
-                        )
-                        for weight in self.global_model.get_weights():
-                            if (np.isnan(weight).any()):
-                                print('Master has a model with weights with nan elements')
-                                self.save_weights(self.config.save_weights_file)
-                                break
                         A3CAgent.publish_weights_to_shared_memory(self.global_model.get_weights(), self.shared_weights_array)
 
                     gradient_calculation_idx += 1
                     if (self.config.save_weights and gradient_calculation_idx % self.config.save_weights_period == 0):
-                        self.save_weights(self.config.save_weights_file)
+                        self.save_weights(self.config.weights_file_path)
                 except queue.Empty:
                     if (global_process_stop.value == 1):
                         exited_successfully = True
@@ -222,7 +238,7 @@ class A3CAgent(BaseAgent):
             if (exited_successfully):
                 print('Exiting successfully after all episodes run...')
                 if (self.config.save_weights):
-                    self.save_weights(self.config.save_weights_file)
+                    self.save_weights(self.config.weights_file_path)
             else:                
                 self.save_weights('/home/naposto/phd/nokia/data/csv_41/entropy_0.1_model_error_happened.h5')
             self.exit_gracefully(False)
@@ -243,13 +259,15 @@ COLUMNS = [
 ] 
 
 class Actor_Critic_Worker(mp.Process):
-    def __init__(self, worker_num, environment, optimizer_lock, 
+    def __init__(self, worker_num, total_workers, successfully_started_worker, environment, optimizer_lock, 
                  config, episodes_to_run, state_size, action_size, action_types, results_queue, gradient_updates_queue,
                  episode_number) -> None:
         super(Actor_Critic_Worker, self).__init__()
         self.environment = environment
         self.config = config
         self.worker_num = worker_num
+        self.total_workers = total_workers
+        self.successfully_started_worker = successfully_started_worker
 
         self.state_size = state_size
         self.action_size = action_size
@@ -266,6 +284,7 @@ class Actor_Critic_Worker(mp.Process):
         self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
         if (self.include_entropy_term):            
             self.entropy_beta = self.config.hyperparameters['Actor_Critic_Common']['entropy_beta']
+            self.entropy_contrib_prob = self.config.hyperparameters['Actor_Critic_Common']['entropy_contrib_prob']
         
 
     def set_process_seeds(self, tf, worker_num):
@@ -293,9 +312,12 @@ class Actor_Critic_Worker(mp.Process):
             self.global_weights = A3CAgent.map_weights_to_shared_memory(
                                 self.local_model.get_weights(), self.shared_weights_array)
 
+            self.environment.setup(self.worker_num, self.total_workers)
+            with self.successfully_started_worker.get_lock():
+                self.successfully_started_worker.value += 1
             import time
             for ep_ix in range(self.episodes_to_run):
-                if (ep_ix % 100 == 0):
+                if (ep_ix % 1 == 0):
                     print('Episode {}/{}'.format(ep_ix, self.episodes_to_run))
                 if (ep_ix % self.local_update_period == 0):
                     with self.optimizer_lock:
@@ -316,22 +338,8 @@ class Actor_Critic_Worker(mp.Process):
                         state = self.reset_game_for_worker()
                         done = False
                         while not done:
-                            ac_start = time.time()
                             action, action_p, action_logp, critic_output = self.pick_action_and_get_critic_values(self.local_model, state, tf)
-                            ac_end = time.time()
-                            self.times_ac.append((ac_end - ac_start) * 1000)
-
-                            with tape.stop_recording():
-                                env_start = time.time()
-                                try:
-                                    next_state, reward, done, _ = self.environment.step(action)
-                                except Exception as e:                                    
-                                    print(state)
-                                    print(action_p)
-                                    print(action_logp)
-
-                                env_end = time.time()
-                                self.times_env.append((env_end - env_start) * 1000)
+                            next_state, reward, done, _ = self.environment.step(action)
                             
                             self.batch_action_mcs.append(action[0])
                             self.batch_action_prb.append(action[1])
@@ -342,7 +350,6 @@ class Actor_Critic_Worker(mp.Process):
                             state = next_state
                             batch_idx += 1
 
-                    loss_start = time.time()
                     advantage = tf.expand_dims(tf.convert_to_tensor(self.batch_rewards, dtype = tf.float32), axis = 1) -  \
                                 tf.squeeze(tf.convert_to_tensor(self.batch_critic_outputs, dtype = tf.float32), axis = 2)
                     critic_loss = advantage ** 2
@@ -360,6 +367,7 @@ class Actor_Critic_Worker(mp.Process):
                             for logp_mcs, logp_prb, mcs, prb in zip(batch_logp_mcs, batch_logp_prb, batch_action_mcs, batch_action_prb)],
                             dtype = tf.float32), axis = 1)
 
+                    actor_loss_inside_term = joint_action_logp * advantage
                     if (self.include_entropy_term):
                         joint_prob = tf.linalg.matmul(
                             batch_p_mcs, batch_p_prb, 
@@ -367,24 +375,36 @@ class Actor_Critic_Worker(mp.Process):
                         
                         plogp = tf.math.xlogy(joint_prob, joint_prob, name = 'plogp')
                         entropy = -1 * tf.expand_dims(tf.reduce_sum(plogp, axis = [1, 2], name = 'batch_entropy'), axis = 1)
+                        entropy_contribution = np.random.binomial(1, np.power(self.entropy_contrib_prob, ep_ix))
+                        actor_loss_inside_term += entropy_contribution * self.entropy_beta * entropy
 
-                    actor_loss = -(joint_action_logp * advantage +  self.entropy_beta * entropy)
+                    actor_loss = -1 * actor_loss_inside_term
 
                     actor_loss_mean = tf.reduce_mean(actor_loss)
                     critic_loss_mean = tf.reduce_mean(critic_loss)
                     
-                    total_loss = actor_loss_mean + critic_loss_mean
-                    loss_end = time.time()
+                    total_loss = actor_loss_mean + critic_loss_mean                    
+                gradients = tape.gradient(total_loss, self.local_model.trainable_weights)
 
-                    
+                for weight in self.local_model.get_weights():
+                        if (np.isnan(weight).any()):
+                            print('Local agent {} has weights with NaN elements'.format(self.worker_num))
+                            break
 
+                for gradient in gradients:
+                        if (np.isnan(gradient).any()):
+                            print('Local agent {} has gradient with NaN elements'.format(self.worker_num))
+                            break
+
+
+                self.gradient_updates_queue.put(gradients)
+                
                 rew_mean = np.mean(self.batch_rewards)
                 entropy_mean = np.mean(entropy)
                 mcs_mean = tf.reduce_sum(tf.reduce_mean(batch_p_mcs, axis = 0) * MCS_SPACE).numpy()
                 prb_mean = tf.reduce_sum(tf.reduce_mean(batch_p_prb, axis = 0) * PRB_SPACE).numpy()
                 
 
-                self.put_gradients_in_queue(tape, total_loss)
                 with self.counter.get_lock():
                     self.counter.value += 1
                     self.results_queue.put([self.worker_num, rew_mean, entropy_mean, mcs_mean, prb_mean, actor_loss_mean.numpy(), critic_loss_mean.numpy()])
@@ -417,22 +437,9 @@ class Actor_Critic_Worker(mp.Process):
         actor_output_probs = model_output[:len(self.action_size)] # normalized probs
         critic_output = model_output[-1]
 
-        actor_output_log_probs = [tf.math.log(output) for output in actor_output_probs]
+        actor_output_log_probs = [tf.math.log(output + 1e-10) for output in actor_output_probs]
         actor_samples = [tf.random.categorical(output, num_samples = 1) for output in actor_output_log_probs]
         action = [actor_sample[0][0].numpy() for actor_sample in actor_samples]
-        return action, actor_output_probs, actor_output_log_probs, critic_output
-
-    def put_gradients_in_queue(self, tape, total_loss):
-        gradients = tape.gradient(total_loss, self.local_model.trainable_weights)
-        
-        for gradient in gradients:
-            if (np.isnan(gradient).any()):
-                print('worker {} has gradients with nan elements'.format(self.worker_num))
-                break
-
-
-        self.gradient_updates_queue.put(gradients)
-
-        
+        return action, actor_output_probs, actor_output_log_probs, critic_output   
 
 
