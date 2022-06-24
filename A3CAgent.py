@@ -84,9 +84,9 @@ class A3CAgent(BaseAgent):
                                             self.state_size, self.action_size, self.action_types, 
                                             results_queue, gradient_updates_queue, episode_number)
                 worker.start()
-                while (successfully_started_worker.value == 0):
-                    pass
                 processes.append(worker)
+            while (successfully_started_worker.value < 8):
+                pass
 
             processes_started_successfully.value = 1
             if (self.config.save_results):
@@ -313,7 +313,8 @@ class Actor_Critic_Worker(mp.Process):
                                 self.local_model.get_weights(), self.shared_weights_array)
 
             self.environment.setup(self.worker_num, self.total_workers)
-            self.successfully_started_worker.value = 1
+            with self.successfully_started_worker.get_lock():
+                self.successfully_started_worker.value += 1
             import time
             for ep_ix in range(self.episodes_to_run):
                 if (ep_ix % 1 == 0):
