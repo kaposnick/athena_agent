@@ -37,14 +37,14 @@ config.save_file = save_folder
 config.save_weights = False
 config.save_weights_file = save_weights_file
 config.save_weights_period = 1e3
-config.load_weights = False
+config.load_initial_weights = False
 config.weights_path = save_weights_file
 config.hyperparameters = {
     'Actor_Critic_Common': {
         'learning_rate': 1e-4,
         'discount_rate': 0.99,
         'linear_hidden_units': [5, 32, 64, 100],
-        'num_actor_outputs': 2,
+        'num_actor_outputs': 1,
         'final_layer_activation': ['softmax', 'softmax', None],
         'normalise_rewards': False,
         'add_extra_noise': False,
@@ -53,6 +53,7 @@ config.hyperparameters = {
         'include_entropy_term': True,
         'local_update_period': 1, # in episodes
         'entropy_beta': 0.1,
+        'entropy_contrib_prob': 1,
         'Actor': {
             'linear_hidden_units': [100, 40]
         },
@@ -73,7 +74,8 @@ for beta_range, beta in zip([beta_all], ['all']):
             decoder_model_path = decoder_model_path,
             tbs_table_path = tbs_table_path,
             noise_range = noise_range, 
-            beta_range= beta_range
+            beta_range= beta_range,
+            policy_output_format = 'mcs_prb_joint'
         )
         for entropy_beta in entropy_betas:
             for run_idx in range(config.runs_per_agent):
@@ -82,10 +84,10 @@ for beta_range, beta in zip([beta_all], ['all']):
                 config.seed = seed
                 config.environment = decoder_env
                 config.hyperparameters['Actor_Critic_Common']['entropy_beta'] = entropy_beta
-                config.save_file = save_folder.format(run_idx, beta, noise, entropy_beta)
+                config.results_file_path = save_folder.format(run_idx, beta, noise, entropy_beta)
                 config.save_weights_file = save_weights_file.format(beta, noise, entropy_beta)
                 config.weights_path = '/home/naposto/phd/nokia/data/csv_41/entropy_0.1_model_error_happened.h5'
-                A3C_Agent = A3CAgent(config, 8)
+                A3C_Agent = A3CAgent(config, 1)
                 A3C_Agent.run_n_episodes()
 
 

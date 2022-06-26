@@ -18,3 +18,10 @@ class Config(object):
         self.randomise_random_seed = True
         self.show_solution_score = False
         self.debug_mode = False
+        self.save_results = False
+        self.save_file = None
+        self.save_weights = False
+        self.save_weights_file = None
+        self.save_weights_period = 1e3
+        self.load_initial_weights = False
+        self.weights_path = None

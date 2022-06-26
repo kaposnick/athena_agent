@@ -29,7 +29,7 @@ MCS_SPACE = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 
 I_MCS_TO_I_TBS = np.array([0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 10, 11, 12, 13,
                             14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
-class BaseEnv(gym.env):
+class BaseEnv(gym.Env):
     def __init__(self, 
                 input_dims: Number, 
                 penalty: Number,
@@ -41,6 +41,7 @@ class BaseEnv(gym.env):
         self.policy_output_format = policy_output_format
         self.title = title
         self.verbose = verbose
+        self.input_dims = input_dims
         self.observation_shape = (input_dims, )
         self.observation_space = spaces.Box(
             low = np.zeros(self.observation_shape),
@@ -54,14 +55,16 @@ class BaseEnv(gym.env):
                 for prb in PRB_SPACE:
                     if (mcs, prb) in PROHIBITED_COMBOS:
                         continue
-                    self.action_array.append( (mcs, prb) )
+                    self.action_array.append( np.array( [mcs, prb] ) )
             self.action_space = spaces.Discrete(len(self.action_array))
             self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
+            self.fn_calculate_mean = self.fn_mcs_prb_joint_mean_calculation
 
         elif (self.policy_output_format == "mcs_prb_independent"):
             n_actions = (len(MCS_SPACE), len(PRB_SPACE))
             self.action_space = spaces.MultiDiscrete(n_actions)
             self.fn_action_translation = self.fn_mcs_prb_indpendent_action_translation
+            self.fn_calculate_mean = self.fn_mcs_prb_independent_mean_calculation
         else:
             raise Exception("Not allowed policy output format: " + str(self.policy_output_format))
 
@@ -71,11 +74,15 @@ class BaseEnv(gym.env):
     def get_state_size(self):
         return self.observation_shape[0]
 
+    def get_action_space(self):
+        return self.action_space
+
     def set_title(self, title):
         self.title = title
 
     def get_title(self):
         return self.title
+
 
     def set_observation(self, observation):
         self.observation = observation
@@ -108,8 +115,18 @@ class BaseEnv(gym.env):
 
     def fn_mcs_prb_joint_action_translation(self, action) -> tuple:
         # in this case action is [action_idx]
-        assert action >= 0 and action < len(self.action_array), 'Action {} not in range'.format(action)
-        return self.action_array[action]
+        action_idx = action[0]
+        assert action_idx >= 0 and action_idx < len(self.action_array), 'Action {} not in range'.format(action_idx)
+        mcs, prb = self.action_array[action_idx]
+        return int(mcs), int(prb)
+
+    def fn_mcs_prb_joint_mean_calculation(self, probs):
+        mcs_mean = 0
+        prb_mean = 0
+        for prob, action in zip(probs[0][0], self.action_array):
+            mcs_mean += prob * action[0]
+            prb_mean += prob * action[1]
+        return mcs_mean, prb_mean
 
     def fn_mcs_prb_indpendent_action_translation(self, action) -> tuple:
         # in this case action is [mcs_action_idx, prb_action_idx]
@@ -119,8 +136,20 @@ class BaseEnv(gym.env):
         assert action_prb >= 0 and action_prb < len(PRB_SPACE), 'Action PRB {} not in range'.format(action_prb)
         return int(MCS_SPACE[action_mcs]), int(PRB_SPACE[action_prb])
 
+    def fn_mcs_prb_independent_mean_calculation(self, probs) -> tuple:
+        mcs_probs = probs[0]
+        prb_probs = probs[1]
+        mcs_mean = mcs_probs * MCS_SPACE
+        prb_mean = prb_probs * PRB_SPACE
+        return mcs_mean, prb_mean
+
+        
+
     def translate_action(self, action) -> tuple:
         return self.fn_action_translation(action)
+
+    def calculate_mean(self, probs) -> tuple:
+        return self.fn_calculate_mean(probs)
 
     def __str__(self) -> str:
         return self.title
@@ -169,7 +198,11 @@ class DecoderEnv(BaseEnv):
     def step(self, action):        
         mcs, prb = super().translate_action(action)
         observation = self.get_observation() # noise, beta, bsr
-        decoder_input_array = np.array([[observation[0], prb, mcs, observation[1]]], dtype=np.float32)
+        noise = observation[0]
+        beta  = observation[1]
+
+        # digital twin input: beta, prb, mcs, noise
+        decoder_input_array = np.array([[beta, prb, mcs, noise]], dtype=np.float32)
         decoder_input = self.tf.convert_to_tensor(decoder_input_array)
 
         # crc, decoding_time = self.decoder_model.predict(decoder_input, batch_size = 1)

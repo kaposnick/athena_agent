@@ -2,6 +2,7 @@ import copy
 from multiprocessing import shared_memory
 from multiprocessing.managers import SharedMemoryManager
 import random
+import gym
 import numpy as np
 import BaseAgent
 import multiprocessing as mp
@@ -24,7 +25,7 @@ class A3CAgent(BaseAgent):
         super(A3CAgent, self).__init__(config)  
         self.num_processes = num_processes
 
-    def run_n_episodes(self, processes_started_successfully):
+    def run_n_episodes(self, processes_started_successfully = None):
         results_queue = mp.Queue()
         gradient_updates_queue = mp.Queue()
         results_queue = mp.Queue()
@@ -64,9 +65,9 @@ class A3CAgent(BaseAgent):
 
         try:
             try:
-                self.shm = shared_memory.SharedMemory(name = 'model_weights', create = True, size=size_in_bytes)
+                self.shm = shared_memory.SharedMemory(name = 'model_weights_12132', create = True, size=size_in_bytes)
             except:
-                self.shm = shared_memory.SharedMemory(name = 'model_weights', create = False, size=size_in_bytes)
+                self.shm = shared_memory.SharedMemory(name = 'model_weights_12132', create = False, size=size_in_bytes)
             memory_created.value = 1
                         
             while (global_ac_initialized.value == 0):
@@ -88,7 +89,8 @@ class A3CAgent(BaseAgent):
             while (successfully_started_worker.value < 8):
                 pass
 
-            processes_started_successfully.value = 1
+            if (processes_started_successfully is not None):
+                processes_started_successfully.value = 1
             if (self.config.save_results):
                 self.save_results(save_file, episode_number, results_queue)
             for worker in processes:
@@ -116,7 +118,7 @@ class A3CAgent(BaseAgent):
 
     @staticmethod
     def get_shared_memory_ref(
-        size, dtype, share_memory_name = 'model_weights'):
+        size, dtype, share_memory_name = 'model_weights_12132'):
         total_variables = int( size / dtype.itemsize )
         shm = shared_memory.SharedMemory(name=share_memory_name, create=False, size=size)        
         shared_weights_array = np.ndarray(
@@ -315,19 +317,20 @@ class Actor_Critic_Worker(mp.Process):
             self.environment.setup(self.worker_num, self.total_workers)
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
-            import time
+            
+            num_outputs = len(self.action_size)
             for ep_ix in range(self.episodes_to_run):
                 if (ep_ix % 1 == 0):
                     print('Episode {}/{}'.format(ep_ix, self.episodes_to_run))
                 if (ep_ix % self.local_update_period == 0):
                     with self.optimizer_lock:
                         self.local_model.set_weights(copy.deepcopy(self.global_weights))
-                self.batch_action_mcs = []
-                self.batch_action_prb = []
-                self.batch_logp_mcs = []
-                self.batch_logp_prb = []
+
+                self.batch_action = []
+                self.batch_logp = []
                 self.batch_rewards = []
                 self.batch_critic_outputs = []
+                self.batch_info = []
 
                 self.times_ac = []
                 self.times_env = []
@@ -338,43 +341,55 @@ class Actor_Critic_Worker(mp.Process):
                         state = self.reset_game_for_worker()
                         done = False
                         while not done:
-                            action, action_logp, critic_output = self.pick_action_and_get_critic_values(self.local_model, state, tf)
+                            action, logp, critic_output = self.pick_action_and_get_critic_values(self.local_model, state, tf)
                             next_state, reward, done, info = self.environment.step(action)
                             
-                            self.batch_action_mcs.append(action[0])
-                            self.batch_action_prb.append(action[1])
-                            self.batch_logp_mcs.append(action_logp[0])
-                            self.batch_logp_prb.append(action_logp[1])
+                            sample_action_entry = []
+                            sample_logp_entry   = []
+                            for output_idx in range(num_outputs):
+                                sample_logp_entry.append(logp[output_idx])
+                                sample_action_entry.append(action[output_idx])
+                            self.batch_action.append(sample_action_entry)
+                            self.batch_logp.append(sample_logp_entry)
                             self.batch_rewards.append(reward)
                             self.batch_critic_outputs.append(critic_output)
+                            self.batch_info.append(info)
                             state = next_state
                             batch_idx += 1
-
+                    
                     advantage = tf.expand_dims(tf.convert_to_tensor(self.batch_rewards, dtype = tf.float32), axis = 1) -  \
                                 tf.squeeze(tf.convert_to_tensor(self.batch_critic_outputs, dtype = tf.float32), axis = 2)
                     critic_loss = advantage ** 2
+
+                    tensor_batch_action = [tf.convert_to_tensor([row[idx] for row in self.batch_action]) for idx in range(num_outputs)]
+                    tensor_batch_logp   = [tf.convert_to_tensor([row[idx] for row in self.batch_logp]) for idx in range(num_outputs)]
+                    tensor_batch_p      = [tf.math.exp(tensor_batch_logp[idx]) for idx in range(num_outputs)]
+
+                    joint_action_logp = []
+                    for batch_idx in range(self.batch_size):
+                        sum = []
+                        for action_idx in range(num_outputs):
+                            sum.append(tensor_batch_logp[action_idx][batch_idx][0][ tensor_batch_action[action_idx][batch_idx] ])
+                        joint_action_logp.append(tf.reduce_sum(sum))
+                    joint_action_logp = tf.expand_dims(joint_action_logp, axis = 1)
+
+                    actor_loss_inside_term = joint_action_logp * advantage # [batch_size x 1]
                     
-                    batch_action_mcs = tf.expand_dims(tf.convert_to_tensor(self.batch_action_mcs, dtype = tf.float32), axis = 1)
-                    batch_action_prb = tf.expand_dims(tf.convert_to_tensor(self.batch_action_prb, dtype = tf.float32), axis = 1)
-                    batch_logp_mcs = tf.convert_to_tensor(self.batch_logp_mcs)
-                    batch_logp_prb = tf.convert_to_tensor(self.batch_logp_prb)
-                    batch_p_mcs = tf.math.exp(batch_logp_mcs)
-                    batch_p_prb = tf.math.exp(batch_logp_prb)
-
-                    joint_action_logp = tf.expand_dims(
-                        tf.convert_to_tensor(
-                            [ tf.reduce_sum([logp_mcs[:, int(mcs[0].numpy())], logp_prb[:, int(prb[0].numpy())]])   
-                            for logp_mcs, logp_prb, mcs, prb in zip(batch_logp_mcs, batch_logp_prb, batch_action_mcs, batch_action_prb)],
-                            dtype = tf.float32), axis = 1)
-
-                    actor_loss_inside_term = joint_action_logp * advantage
                     if (self.include_entropy_term):
-                        joint_prob = tf.linalg.matmul(
-                            batch_p_mcs, batch_p_prb, 
-                            transpose_a = True, name = 'joint_prob')
+                        joint_probs = []
+                        for batch_idx in range(self.batch_size):
+                            entry = tensor_batch_p[0][batch_idx]
+                            for action_idx in range(1, num_outputs):
+                                entry_2 = tensor_batch_p[action_idx][batch_idx]
+                                entry = tf.linalg.matmul(entry, entry_2, transpose_a = True, name = 'joint_prob')
+                                entry = tf.expand_dims(tf.reshape(entry, [-1]), axis = 0)
+                            joint_probs.append(entry)
+
+                        joint_probs = tf.convert_to_tensor(joint_probs)                       
                         
-                        plogp = tf.math.xlogy(joint_prob, joint_prob, name = 'plogp')
+                        plogp = tf.math.xlogy(joint_probs, joint_probs, name = 'plogp')
                         entropy = -1 * tf.expand_dims(tf.reduce_sum(plogp, axis = [1, 2], name = 'batch_entropy'), axis = 1)
+                        
                         entropy_contribution = np.random.binomial(1, np.power(self.entropy_contrib_prob, ep_ix))
                         actor_loss_inside_term += entropy_contribution * self.entropy_beta * entropy
 
@@ -398,11 +413,12 @@ class Actor_Critic_Worker(mp.Process):
 
 
                 self.gradient_updates_queue.put(gradients)
+
+                probs_batched = [tf.reduce_mean(tensor_batch_p[action_idx], axis = 0)   for action_idx in range(num_outputs)]
                 
                 rew_mean = np.mean(self.batch_rewards)
                 entropy_mean = np.mean(entropy)
-                mcs_mean = tf.reduce_sum(tf.reduce_mean(batch_p_mcs, axis = 0) * MCS_SPACE).numpy()
-                prb_mean = tf.reduce_sum(tf.reduce_mean(batch_p_prb, axis = 0) * PRB_SPACE).numpy()
+                mcs_mean, prb_mean = self.environment.calculate_mean(probs_batched)
                 
 
                 with self.counter.get_lock():
