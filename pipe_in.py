@@ -60,7 +60,7 @@ class Coordinator():
 
         config.save_weights = True
         config.save_weights_period = 100
-        config.weights_file_path = '/home/naposto/phd/nokia/data/csv_44_low_noise_high_beta/weights_w_pretrained.h5'
+        config.save_weights_file = '/home/naposto/phd/nokia/data/csv_44_low_noise_high_beta/weights_w_pretrained.h5'
         
         config.load_initial_weights = True
         config.initial_weights_path = '/home/naposto/phd/nokia/data/csv_41/beta_all_noise_all_entropy_0.1_model.h5'

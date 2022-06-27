@@ -39,6 +39,7 @@ class A3CAgent(BaseAgent):
         
         self.optimizer_lock = mp.Lock()
         save_file = self.config.results_file_path
+        self.write_to_results_queue_lock = mp.Lock()
 
         if (self.config.num_episodes_to_run > 0):
             episodes_per_process = int(self.config.num_episodes_to_run / self.num_processes)
@@ -74,19 +75,19 @@ class A3CAgent(BaseAgent):
                 pass
             
             print('Optimizer thread started successfully')
+            successfully_started_worker = mp.Value('i', 0)
             for process_num in range(self.num_processes):
                 worker_environment = copy.deepcopy(self.environment)
-                successfully_started_worker = mp.Value('i', 0)
                 worker = Actor_Critic_Worker(process_num, 
                                             self.num_processes,
                                             successfully_started_worker,
-                                            worker_environment, self.optimizer_lock,
+                                            worker_environment, self.optimizer_lock, self.write_to_results_queue_lock,
                                             self.config, episodes_per_process, 
                                             self.state_size, self.action_size, self.action_types, 
                                             results_queue, gradient_updates_queue, episode_number)
                 worker.start()
                 processes.append(worker)
-            while (successfully_started_worker.value < 8):
+            while (successfully_started_worker.value < self.num_processes):
                 pass
 
             if (processes_started_successfully is not None):
@@ -103,14 +104,22 @@ class A3CAgent(BaseAgent):
 
     def save_results(self, save_file, episode_number, results_queue):
         with open(save_file, 'w') as f:
-            f.write('|'.join(COLUMNS) + '\n')            
+            additional_env_columns = self.environment.get_csv_result_policy_output_columns()            
+            add_columns_size = len(additional_env_columns)
+            f.write('|'.join(COLUMNS + additional_env_columns) + '\n')            
             while True:
-                with episode_number.get_lock():
+                with self.write_to_results_queue_lock:
                     carry_on = episode_number.value < self.config.num_episodes_to_run
                     episode = episode_number.value
                 if carry_on:
                     if not results_queue.empty():
-                        result = [str(x) for x in [episode, *results_queue.get()]]
+                        q_result = results_queue.get()
+                        result = [str(x) for x in [episode, *q_result[0]]]
+                        if (episode % 100 == 0):
+                            additional_info = [str(x).replace('\n', '') for x in q_result[1]]
+                        else:
+                            additional_info = [''] * add_columns_size 
+                        result += additional_info
                         f.write('|'.join(result) + '\n')
                         f.flush()
                 else: break
@@ -150,7 +159,7 @@ class A3CAgent(BaseAgent):
 
         return weights
 
-    def exit_gracefully(self, unlink):
+    def exit_gracefully(self, unlink = True):
         if hasattr(self, 'shared_weights_array'):
             try:
                 if (self.shared_weights_array is not None):
@@ -230,7 +239,7 @@ class A3CAgent(BaseAgent):
 
                     gradient_calculation_idx += 1
                     if (self.config.save_weights and gradient_calculation_idx % self.config.save_weights_period == 0):
-                        self.save_weights(self.config.weights_file_path)
+                        self.save_weights(self.config.save_weights_file)
                 except queue.Empty:
                     if (global_process_stop.value == 1):
                         exited_successfully = True
@@ -240,9 +249,9 @@ class A3CAgent(BaseAgent):
             if (exited_successfully):
                 print('Exiting successfully after all episodes run...')
                 if (self.config.save_weights):
-                    self.save_weights(self.config.weights_file_path)
+                    self.save_weights(self.config.save_weights_file)
             else:                
-                self.save_weights('/home/naposto/phd/nokia/data/csv_41/entropy_0.1_model_error_happened.h5')
+                self.save_weights('/home/naposto/phd/nokia/data/csv_45/entropy_0.1_model_error_happened.h5')
             self.exit_gracefully(False)
     
     def save_weights(self, save_weights_file):
@@ -261,7 +270,7 @@ COLUMNS = [
 ] 
 
 class Actor_Critic_Worker(mp.Process):
-    def __init__(self, worker_num, total_workers, successfully_started_worker, environment, optimizer_lock, 
+    def __init__(self, worker_num, total_workers, successfully_started_worker, environment, optimizer_lock, write_to_results_queue_lock,
                  config, episodes_to_run, state_size, action_size, action_types, results_queue, gradient_updates_queue,
                  episode_number) -> None:
         super(Actor_Critic_Worker, self).__init__()
@@ -274,6 +283,7 @@ class Actor_Critic_Worker(mp.Process):
         self.state_size = state_size
         self.action_size = action_size
         self.optimizer_lock = optimizer_lock
+        self.write_to_results_queue_lock = write_to_results_queue_lock
         self.episodes_to_run = episodes_to_run
         self.action_types = action_types
         self.results_queue = results_queue
@@ -317,6 +327,7 @@ class Actor_Critic_Worker(mp.Process):
             self.environment.setup(self.worker_num, self.total_workers)
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
+                
             
             num_outputs = len(self.action_size)
             for ep_ix in range(self.episodes_to_run):
@@ -419,11 +430,11 @@ class Actor_Critic_Worker(mp.Process):
                 rew_mean = np.mean(self.batch_rewards)
                 entropy_mean = np.mean(entropy)
                 mcs_mean, prb_mean = self.environment.calculate_mean(probs_batched)
-                
+                additional_columns = self.environment.get_csv_result_policy_output(probs_batched)
 
-                with self.counter.get_lock():
+                with self.write_to_results_queue_lock:
                     self.counter.value += 1
-                    self.results_queue.put([self.worker_num, rew_mean, entropy_mean, mcs_mean, prb_mean, actor_loss_mean.numpy(), critic_loss_mean.numpy()])
+                    self.results_queue.put([ [self.worker_num, rew_mean, entropy_mean, mcs_mean, prb_mean, actor_loss_mean.numpy(), critic_loss_mean.numpy()], additional_columns ])
                 
         finally:
             if hasattr(self, 'shared_weights_array'):

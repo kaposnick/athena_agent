@@ -19,9 +19,9 @@ class Config(object):
         self.show_solution_score = False
         self.debug_mode = False
         self.save_results = False
-        self.save_file = None
+        self.results_file_path = None
         self.save_weights = False
         self.save_weights_file = None
         self.save_weights_period = 1e3
         self.load_initial_weights = False
-        self.weights_path = None
+        self.initial_weights_path = None

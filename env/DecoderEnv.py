@@ -90,6 +90,29 @@ class BaseEnv(gym.Env):
     def get_observation(self):
         return self.observation
 
+    def get_csv_result_policy_output_columns(self) -> list:
+        if (self.policy_output_format == "mcs_prb_joint"):
+            columns = ['mcs_prb']
+            return columns
+        elif (self.policy_output_format == "mcs_prb_independent"):
+            columns = ['mcs', 'prb']
+            return columns
+        else: raise Exception("Can't handle policy output format")
+
+    def get_csv_result_policy_output(self, probs) -> list:
+        if (self.policy_output_format == "mcs_prb_joint"):
+            action_probs = probs[0]
+            result = [action_prob.numpy() for action_prob in action_probs]
+            return result
+        elif (self.policy_output_format == "mcs_prb_independent"):
+            mcs_probs = probs[0]
+            mcs_result = [action_prob.numpy() for action_prob in mcs_probs]
+            prb_probs = probs[1]
+            prb_result = [action_prob.numpy() for action_prob in prb_probs]
+            return mcs_result + prb_result
+        else: raise Exception("Can't handle policy output format")
+
+
     def to_tbs(self, mcs, prb):
         tbs = 0
         if (prb > 0):
@@ -126,7 +149,7 @@ class BaseEnv(gym.Env):
         for prob, action in zip(probs[0][0], self.action_array):
             mcs_mean += prob * action[0]
             prb_mean += prob * action[1]
-        return mcs_mean, prb_mean
+        return mcs_mean.numpy(), prb_mean.numpy()
 
     def fn_mcs_prb_indpendent_action_translation(self, action) -> tuple:
         # in this case action is [mcs_action_idx, prb_action_idx]
