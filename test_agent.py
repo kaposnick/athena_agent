@@ -16,8 +16,12 @@ noise_high = (80, 100)
 noise_all = (10, 100)
 
 decoder_env = DecoderEnv(
-    decoder_model_path = decoder_model_path,
-    tbs_table_path     = tbs_table_path,
+    # decoder_model_path = decoder_model_path,
+    # tbs_table_path     = tbs_table_path,
+    decoder_model_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/crc_ce_dcd_time_prob.h5',
+    input_norm_mean_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/scaler_mean.npy',
+    input_norm_var_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/scaler_var.npy',
+    tbs_table_path = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.json',
     noise_range        = noise_high,
     beta_range         = beta_high
 )
@@ -57,29 +61,26 @@ config.hyperparameters = {
         
 }
 
-# entropy_betas = [0.1, 0.01, 0.5]
-entropy_betas = [0.1,0.2,  .05, 1]
-
 import copy
 for beta_range, beta in zip([beta_high], ['high']):
     for noise_range, noise in zip([noise_low], ['low']):
         decoder_env = DecoderEnv(
-            decoder_model_path = decoder_model_path,
-            tbs_table_path = tbs_table_path,
-            noise_range = noise_range, 
-            beta_range= beta_range,
+            decoder_model_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/crc_ce_dcd_time_prob.h5',
+            input_norm_mean_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/scaler_mean.npy',
+            input_norm_var_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/scaler_var.npy',
+            tbs_table_path = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.json',
+            noise_range = [-15, 50], 
+            beta_range= [650, 700],
             policy_output_format = 'mcs_prb_joint'
         )
-        for entropy_beta in entropy_betas:
-            for run_idx in range(config.runs_per_agent):
-                seed = run_idx * 32 + 1
-                config = copy.deepcopy(config)
-                config.seed = seed
-                config.environment = decoder_env
-                config.hyperparameters['Actor_Critic_Common']['entropy_beta'] = entropy_beta
-                save_folder = '/home/naposto/phd/nokia/data/csv_45/low_noise_high_beta_joint/run_{}_beta_{}_noise_{}_entropy_{}.csv'
-                config.results_file_path = save_folder.format(run_idx, beta, noise, entropy_beta)
-                config.save_weights = True
-                config.save_weights_file = '/home/naposto/phd/nokia/data/csv_45/low_noise_high_beta_joint/run_{}_beta_{}_noise_{}_entropy_{}.h5'.format(run_idx, beta, noise, entropy_beta)
-                A3C_Agent = A3CAgent(config, 8)
-                A3C_Agent.run_n_episodes()
+        for run_idx in range(config.runs_per_agent):
+            seed = run_idx * 32 + 1
+            config = copy.deepcopy(config)
+            config.seed = seed
+            config.environment = decoder_env
+            save_folder = '/home/naposto/phd/nokia/data/csv_46/low_noise_high_beta_joint/run_{}.csv'
+            config.results_file_path = save_folder.format(run_idx)
+            config.save_weights = True
+            config.save_weights_file = '/home/naposto/phd/nokia/data/csv_46/low_noise_high_beta_joint/run_{}.h5'.format(run_idx)
+            A3C_Agent = A3CAgent(config, 8)
+            A3C_Agent.run_n_episodes()
