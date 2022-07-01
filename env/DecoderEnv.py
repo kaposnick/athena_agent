@@ -9,7 +9,7 @@ import numpy as np
 NOISE_MIN = -15.0
 NOISE_MAX = 100.0
 BETA_MIN  = 1.0
-BETA_MAX  = 700.0
+BETA_MAX  = 1000.0
 BSR_MIN   = 0
 BSR_MAX   = 180e3
 
@@ -182,6 +182,7 @@ class DecoderEnv(BaseEnv):
                  decoder_model_path,
                  tbs_table_path,
                  version='probabilistic',
+                 sample_strategy = 'percentile_99',
                  input_norm_mean_path = None,
                  input_norm_var_path = None,
                  noise_range = [NOISE_MIN, NOISE_MAX], 
@@ -206,6 +207,7 @@ class DecoderEnv(BaseEnv):
         if (version == 'probabilistic'):
             self.input_norm_mean_path = input_norm_mean_path
             self.input_norm_var_path  = input_norm_var_path
+            self.sample_strategy = sample_strategy
 
         if noise_range is not None:
             assert noise_range[0] >= NOISE_MIN and noise_range[1] <= NOISE_MAX
@@ -288,7 +290,12 @@ class DecoderEnv(BaseEnv):
         decode_prob, decoding_time_output = self.decoder_model(decoder_input, training = False)
         if (self.version == 'probabilistic'):
             dcd_time_mean, dcd_time_stdv = decoding_time_output.mean(), decoding_time_output.stddev()
-            decoding_time = self.tfd.Normal(loc = dcd_time_mean, scale = dcd_time_stdv).sample()[0][0].numpy()
+            if (self.sample_strategy == 'sample'):
+                # sampling 
+                decoding_time = self.tfd.Normal(loc = dcd_time_mean, scale = dcd_time_stdv).sample()[0][0].numpy()
+            elif (self.sample_strategy == 'percentile_99'):
+                # 99% percentile -> Z = 2.326
+                decoding_time = dcd_time_mean + 2.326 * dcd_time_stdv[0][0].numpy()
         else:
             decoding_time = decoding_time_output
 

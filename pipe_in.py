@@ -14,7 +14,7 @@ REWARD_IN = '/tmp/return_in'
 class Coordinator():
     def __init__(self):
         self.total_agents = 8
-        self.verbose = 0
+        self.verbose = 1
 
         # validity byte
         # observation is: noise, beta, bsr all are integers32
@@ -50,34 +50,70 @@ class Coordinator():
         self.sched_proc = mp.Process(target=self.rcv_obs_send_act_func, name= 'scheduler_intf')
         self.decod_proc = mp.Process(target=self.rcv_return_func, name='decoder_intf')
 
-    def get_environment_config(self) -> Config:
-        config = Config()
-        config.seed = 1
-        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose)
-        config.num_episodes_to_run = 5e3
-        config.save_results = True
-        config.results_file_path = '/home/naposto/phd/nokia/data/csv_44_low_noise_high_beta/results_w_pretrained.csv'
+    def kill_all(self):
+        print('Killing coordinator')
+        self.a3c_agent.kill_all()
+        if (self.decod_proc.is_alive()):
+            self.decod_proc.kill()
+            self.decod_proc.join()
+        if (self.sched_proc.is_alive()):
+            self.sched_proc.kill()
+            self.sched_proc.join()
 
-        config.save_weights = True
-        config.save_weights_period = 100
-        config.save_weights_file = '/home/naposto/phd/nokia/data/csv_44_low_noise_high_beta/weights_w_pretrained.h5'
+    def get_environment_config(self) -> Config:
+        import sys
+        args = sys.argv[1:]
+        if (len(args) >= 4):
+            seed = int(args[0])
+            num_episodes = int(args[1])
+            results_file = args[2]
+            load_pretrained_weights = bool(int(args[3]))
+            if (load_pretrained_weights):
+                pretrained_weights_path = args[4]
+        else:
+            i = 4
+            seed = i * 35
+            num_episodes = 2000
+            results_file = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_noise_untrained_4.csv'
+            load_pretrained_weights = False
+            pretrained_weights_path = '/home/naposto/phd/nokia/data/csv_46/train_all.h5'
+
+
+
+        # index 0 -> initial seed
+        # index 1 -> number of episodes
+        # index 2 -> results file
+        # index 3 -> agent's initial weight [True | False]
+        # index 4 -> agent's initial weight file (in .h5 format)
+
+        config = Config()
+        config.seed = seed
+        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, input_dims = 2)
+        config.num_episodes_to_run = num_episodes
+        config.save_results = True
+        config.results_file_path = results_file
+        # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_noise_trained_2.csv'
+
+        config.save_weights = False
+        config.save_weights_period = 1000
+        config.save_weights_file = '/home/naposto/phd/nokia/data/csv_46/real_enb_weights.h5'
         
-        config.load_initial_weights = True
-        config.initial_weights_path = '/home/naposto/phd/nokia/data/csv_41/beta_all_noise_all_entropy_0.1_model.h5'
+        config.load_initial_weights = load_pretrained_weights
+        if (config.load_initial_weights):
+            config.initial_weights_path = pretrained_weights_path
+            # config.initial_weights_path = '/home/naposto/phd/nokia/data/csv_46/train_all.h5'
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
                 'learning_rate': 1e-3,
                 'linear_hidden_units': [5, 32, 64, 100],
-                'num_actor_outputs': 2,
-                'final_layer_activation': ['softmax', 'softmax', None],
-                'normalise_rewards': False,
-                'add_extra_noise': False,
+                'num_actor_outputs': 1,
+                'final_layer_activation': ['softmax', None],
                 'batch_size': 64,
                 'local_update_period': 1, # in episodes
                 'include_entropy_term': True,
                 'entropy_beta': 0.1,
-                'entropy_contrib_prob': 0.995,
+                'entropy_contrib_prob': 0.999,
                 'Actor': {
                     'linear_hidden_units': [100, 40]
                 },
@@ -195,6 +231,17 @@ class Coordinator():
                     raise e
                 pass
 
+
+def exit_gracefully():
+    coordinator.kill_all()
+
+
+coordinator = None
+
 if __name__== '__main__':
+    import signal
+    signal.signal(signal.SIGINT , exit_gracefully)
+    signal.signal(signal.SIGTERM, exit_gracefully)
     coordinator = Coordinator()
     coordinator.start()
+

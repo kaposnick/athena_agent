@@ -4,7 +4,7 @@ import gym
 from gym import spaces
 import numpy as np
 
-from agents.env.DecoderEnv import BaseEnv
+from env.DecoderEnv import BaseEnv
 
 PROHIBITED_COMBOS = [(0, 1), (0, 2), (0,3), 
                   (1, 0), (1, 1),
@@ -23,7 +23,7 @@ class SrsRanEnv(BaseEnv):
     def __init__(self,
                 input_dims = 3,
                 penalty = 15,
-                policy_output_format = "mcs_prb_independent",
+                policy_output_format = "mcs_prb_joint",
                 title = "srsRAN Environment",
                 verbose = 0) -> None:
         super(SrsRanEnv, self).__init__(
@@ -58,14 +58,11 @@ class SrsRanEnv(BaseEnv):
                 pass
             result = self.result_nd_array[1:]
             self.result_nd_array[0] = 0
-            if (self.verbose == 1):
-                print('{} - Res: {}'.format(str(self), result))
         else:
-            result = True, 1, 0
-            if (self.verbose == 1):
-                print('{} - Res (not applicable)'.format(str(self), result))
+            result = np.array([True, 1, 0])
         crc, decoding_time, tbs = result
-        reward = super().get_reward(mcs, prb, crc, decoding_time)
+        reward = super().get_reward(mcs, prb, crc, decoding_time, tbs)
+        print('{} - {}'.format(str(self), result.tolist() + [reward]))
         return super().get_agent_result(reward, mcs, prb, crc, decoding_time)
         
 

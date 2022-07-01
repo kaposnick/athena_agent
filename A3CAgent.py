@@ -24,9 +24,13 @@ class A3CAgent(BaseAgent):
     def __init__(self, config, num_processes) -> None:
         super(A3CAgent, self).__init__(config)  
         self.num_processes = num_processes
+        self.worker_processes = []
+        self.optimizer_worker = None
+
+    def kill_all(self):
+        self.exit_gracefully()
 
     def run_n_episodes(self, processes_started_successfully = None):
-        results_queue = mp.Queue()
         gradient_updates_queue = mp.Queue()
         results_queue = mp.Queue()
         
@@ -46,9 +50,8 @@ class A3CAgent(BaseAgent):
         else:
             episodes_per_process = -1 # run indefinitely
 
-        processes = []
 
-        optimizer_worker = mp.Process(target = self.update_shared_model, 
+        self.optimizer_worker = mp.Process(target = self.update_shared_model, 
                                     args = (gradient_updates_queue,
                                             self.hyperparameters,
                                             memory_size_in_bytes, 
@@ -56,10 +59,10 @@ class A3CAgent(BaseAgent):
                                             global_process_stop))
 
         
-        import signal
-        signal.signal(signal.SIGINT , self.exit_gracefully)
-        signal.signal(signal.SIGTERM, self.exit_gracefully)
-        optimizer_worker.start()
+        # import signal
+        # signal.signal(signal.SIGINT , self.exit_gracefully)
+        # signal.signal(signal.SIGTERM, self.exit_gracefully)
+        self.optimizer_worker.start()
         while (memory_size_in_bytes.value == 0):
             pass
         size_in_bytes = memory_size_in_bytes.value
@@ -86,7 +89,7 @@ class A3CAgent(BaseAgent):
                                             self.state_size, self.action_size, self.action_types, 
                                             results_queue, gradient_updates_queue, episode_number)
                 worker.start()
-                processes.append(worker)
+                self.worker_processes.append(worker)
             while (successfully_started_worker.value < self.num_processes):
                 pass
 
@@ -94,10 +97,10 @@ class A3CAgent(BaseAgent):
                 processes_started_successfully.value = 1
             if (self.config.save_results):
                 self.save_results(save_file, episode_number, results_queue)
-            for worker in processes:
+            for worker in self.worker_processes:
                 worker.join()
             global_process_stop.value = 1
-            optimizer_worker.join()
+            self.optimizer_worker.join()
         finally:
             self.exit_gracefully(True)
 
@@ -160,23 +163,17 @@ class A3CAgent(BaseAgent):
         return weights
 
     def exit_gracefully(self, unlink = True):
-        if hasattr(self, 'shared_weights_array'):
-            try:
-                if (self.shared_weights_array is not None):
-                    del self.shared_weights_array
-            finally: 
-                pass
-        if hasattr(self, 'shm'):
-            try:
-                if (self.shm != None):                        
-                    self.shm.close()
+        for worker_process in self.worker_processes:
+            if (worker_process.is_alive()):
+                worker_process.kill()
+                worker_process.join()
+        
+        if (self.optimizer_worker.is_alive()):
+            self.optimizer_worker.kill()
+            self.optimizer_worker.join()
 
-                    if (unlink):
-                        self.shm.unlink()
-            except:
-                pass
-            finally:
-                pass
+
+        
 
     
     def update_shared_model(self, gradient_updates_queue, hyperparameters,
