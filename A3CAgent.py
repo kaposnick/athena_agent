@@ -8,7 +8,6 @@ import BaseAgent
 import multiprocessing as mp
 from BaseAgent import BaseAgent
 from common_utils import import_tensorflow
-from env.SrsRanEnv import MCS_SPACE, PRB_SPACE
 
 COL_DT_AC_LOSS_MEAN = 'ac_loss_mean'
 COL_DT_CR_LOSS_MEAN = 'cr_loss_mean'
@@ -107,8 +106,7 @@ class A3CAgent(BaseAgent):
 
     def save_results(self, save_file, episode_number, results_queue):
         with open(save_file, 'w') as f:
-            additional_env_columns = self.environment.get_csv_result_policy_output_columns()            
-            add_columns_size = len(additional_env_columns)
+            additional_env_columns = self.environment.get_csv_result_policy_output_columns()
             f.write('|'.join(COLUMNS + additional_env_columns) + '\n')            
             while True:
                 with self.write_to_results_queue_lock:
@@ -118,11 +116,13 @@ class A3CAgent(BaseAgent):
                     if not results_queue.empty():
                         q_result = results_queue.get()
                         result = [str(x) for x in [episode, *q_result[0]]]
-                        if (episode % 100 == 0):
-                            additional_info = [str(x).replace('\n', '') for x in q_result[1]]
-                        else:
-                            additional_info = [''] * add_columns_size 
-                        result += additional_info
+                        for additional_column in q_result[1]:
+                            period = additional_column['period']
+                            value  = additional_column['value']
+                            if (episode % period == 0):
+                                result.append(str(value))
+                            else:
+                                result.append('')
                         f.write('|'.join(result) + '\n')
                         f.flush()
                 else: break
@@ -427,7 +427,7 @@ class Actor_Critic_Worker(mp.Process):
                 rew_mean = np.mean(self.batch_rewards)
                 entropy_mean = np.mean(entropy)
                 mcs_mean, prb_mean = self.environment.calculate_mean(probs_batched)
-                additional_columns = self.environment.get_csv_result_policy_output(probs_batched)
+                additional_columns = self.environment.get_csv_result_policy_output(probs_batched, self.batch_info)
 
                 with self.write_to_results_queue_lock:
                     self.counter.value += 1

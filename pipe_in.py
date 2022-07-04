@@ -71,12 +71,12 @@ class Coordinator():
             if (load_pretrained_weights):
                 pretrained_weights_path = args[4]
         else:
-            i = 4
+            i = 0
             seed = i * 35
-            num_episodes = 2000
-            results_file = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_noise_untrained_4.csv'
+            num_episodes = 1100
+            results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
             load_pretrained_weights = False
-            pretrained_weights_path = '/home/naposto/phd/nokia/data/csv_46/train_all.h5'
+            pretrained_weights_path = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'
 
 
 

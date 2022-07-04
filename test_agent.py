@@ -8,7 +8,7 @@ tbs_table_path    = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.js
 beta_low = (1, 50)
 beta_medium = (50, 650)
 beta_high = (650, 1000)
-beta_all = (1, 700)
+beta_all = (1, 1000)
 
 noise_low = (-15,50)
 noise_medium = (50,80)
@@ -68,6 +68,8 @@ for beta_range, beta in zip([beta_high], ['all']):
             noise_range = noise_range, 
             beta_range= beta_range,
             policy_output_format = 'mcs_prb_joint',
+            version='probabilistic',
+            sample_strategy = 'percentile_99',
             input_dims=2
         )
         for run_idx in range(config.runs_per_agent):
@@ -75,9 +77,9 @@ for beta_range, beta in zip([beta_high], ['all']):
             config = copy.deepcopy(config)
             config.seed = seed
             config.environment = decoder_env
-            save_folder = '/home/naposto/phd/nokia/agent_models/model_v2/model.csv'
+            save_folder = '/home/naposto/phd/nokia/agent_models/model_v2/model_training_output.csv'
             config.results_file_path = save_folder.format(run_idx)
             config.save_weights = True
-            config.save_weights_file = '/home/naposto/phd/nokia/agent_models/model_v2/model.h5'.format(run_idx)
+            config.save_weights_file = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'.format(run_idx)
             A3C_Agent = A3CAgent(config, 8)
             A3C_Agent.run_n_episodes()

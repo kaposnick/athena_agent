@@ -13,14 +13,16 @@ BETA_MAX  = 1000.0
 BSR_MIN   = 0
 BSR_MAX   = 180e3
 
-PROHIBITED_COMBOS = [(0, 1), (0, 2), (0,3), 
+PROHIBITED_COMBOS = [(0, 0), (0, 1), (0,2), 
                   (1, 0), (1, 1),
                   (2, 0), (2, 1),
-                  (3, 0), (4, 0), (5, 0), 
-                  (6, 1)]
+                  (3, 0), 
+                  (4, 0), 
+                  (5, 0), 
+                  (6, 0)]
 
 PRB_SPACE = np.array(
-                    [0, 1, 2, 3, 4, 5, 6, 8, 9, 
+                    [1, 2, 3, 4, 5, 6, 8, 9, 
                       10, 12, 15, 16, 18, 
                       20, 24, 25, 27, 
                       30, 32, 36, 40, 45], dtype = np.float16)
@@ -51,9 +53,11 @@ class BaseEnv(gym.Env):
 
         if (self.policy_output_format == "mcs_prb_joint"):
             self.action_array = []
+            self.action_array.append( np.array( [0, 0] ) )
             for mcs in MCS_SPACE:
                 for prb in PRB_SPACE:
-                    if (mcs, prb) in PROHIBITED_COMBOS:
+                    combo = ( I_MCS_TO_I_TBS[int(mcs)], int(prb) - 1)
+                    if combo in PROHIBITED_COMBOS:
                         continue
                     self.action_array.append( np.array( [mcs, prb] ) )
             self.action_space = spaces.Discrete(len(self.action_array))
@@ -92,18 +96,40 @@ class BaseEnv(gym.Env):
 
     def get_csv_result_policy_output_columns(self) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):
-            columns = ['mcs_prb']
+            columns = ['crc_ok', 'dec_time_ok', 'dec_time_mean', 'dec_time_std', 'mcs_prb']
             return columns
         elif (self.policy_output_format == "mcs_prb_independent"):
             columns = ['mcs', 'prb']
             return columns
         else: raise Exception("Can't handle policy output format")
 
-    def get_csv_result_policy_output(self, probs) -> list:
+    def get_csv_result_policy_output(self, probs, infos) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):
             action_probs = probs[0]
-            result = [action_prob.numpy() for action_prob in action_probs]
-            return result
+            mcs_prb = str([action_prob.numpy() for action_prob in action_probs[0]]).replace('\n', '')
+
+            # mcs_prb = [str(x).replace('\n', '') for x in [action_prob.numpy() for action_prob in action_probs]]
+            num_crc_ok = 0
+            num_dec_time_ok = 0
+            dec_times = []
+            len_infos = len(infos)
+            for info in infos:
+                crc = info['crc']
+                dec_time = info['decoding_time']
+                if crc:
+                    num_crc_ok += 1
+                if dec_time < 3000:
+                    num_dec_time_ok += 1
+                dec_times.append(dec_time)
+            crc_ok = num_crc_ok / len_infos if len_infos > 0 else -1
+            dec_time_ok = num_dec_time_ok / len_infos if len_infos > 0 else -1
+            dec_time_mean = np.mean(dec_times)
+            dec_time_std = np.std(dec_times)
+            return [ { 'period': 1, 'value': np.round(crc_ok, 3) }, 
+                     { 'period': 1, 'value': np.round(dec_time_ok, 3) },
+                     { 'period': 1, 'value': int(dec_time_mean)},
+                     { 'period': 1, 'value': int(dec_time_std)},
+                     { 'period': 100, 'value': mcs_prb }  ]
         elif (self.policy_output_format == "mcs_prb_independent"):
             mcs_probs = probs[0]
             mcs_result = [action_prob.numpy() for action_prob in mcs_probs]
@@ -122,7 +148,7 @@ class BaseEnv(gym.Env):
 
     def get_reward(self, mcs, prb, crc, decoding_time, tbs = None):
         reward = 0
-        if ( self.policy_output_format == "mcs_prb_independent" and (mcs, prb) in PROHIBITED_COMBOS):
+        if ( (mcs, prb) in PROHIBITED_COMBOS):
             reward = -1 * self.penalty
         else:
             if (crc == True and decoding_time <= 3000):
@@ -295,7 +321,7 @@ class DecoderEnv(BaseEnv):
                 decoding_time = self.tfd.Normal(loc = dcd_time_mean, scale = dcd_time_stdv).sample()[0][0].numpy()
             elif (self.sample_strategy == 'percentile_99'):
                 # 99% percentile -> Z = 2.326
-                decoding_time = dcd_time_mean + 2.326 * dcd_time_stdv[0][0].numpy()
+                decoding_time = (dcd_time_mean + 2.326 * dcd_time_stdv)[0][0].numpy()
         else:
             decoding_time = decoding_time_output
 
@@ -327,7 +353,7 @@ if (__name__=="__main__"):
             input_norm_var_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/scaler_var.npy',
             tbs_table_path = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.json',
             noise_range = [-15, 50], 
-            beta_range= [650, 700],
+            beta_range= [650, 1000],
             policy_output_format = 'mcs_prb_joint'
     )
     environment.setup(0, 1)

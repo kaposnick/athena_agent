@@ -6,19 +6,6 @@ import numpy as np
 
 from env.DecoderEnv import BaseEnv
 
-PROHIBITED_COMBOS = [(0, 1), (0, 2), (0,3), 
-                  (1, 0), (1, 1),
-                  (2, 0), (2, 1),
-                  (3, 0), (4, 0), (5, 0), 
-                  (6, 1)]
-
-PRB_SPACE = np.array(
-                    [0, 1, 2, 3, 4, 5, 6, 8, 9, 
-                      10, 12, 15, 16, 18, 
-                      20, 24, 25, 27, 
-                      30, 32, 36, 40, 45], dtype = np.float16)
-MCS_SPACE = np.arange(0, 25,  dtype=np.float16)
-
 class SrsRanEnv(BaseEnv):
     def __init__(self,
                 input_dims = 3,
