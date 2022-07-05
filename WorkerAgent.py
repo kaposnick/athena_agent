@@ -255,20 +255,7 @@ class Actor_Critic_Worker(mp.Process):
                 self.send_results(tf, info)                
                 
         finally:
-            if hasattr(self, 'shared_weights_array'):
-                try:
-                    if (self.shared_weights_array is not None):
-                        del self.shared_weights_array
-                finally: 
-                    pass
-            if hasattr(self, 'shm'):
-                try:
-                    if (self.shm != None):                        
-                        self.shm.close()
-                except:
-                    pass
-                finally:
-                    pass
+            print(str(self) + ' -> Exiting...')
 
     def pick_action_and_get_critic_values(self, state: np.array, tf):
         tensor_state = tf.convert_to_tensor([state], dtype = tf.float32)
