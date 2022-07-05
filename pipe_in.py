@@ -14,7 +14,7 @@ REWARD_IN = '/tmp/return_in'
 class Coordinator():
     def __init__(self):
         self.total_agents = 8
-        self.verbose = 1
+        self.verbose = 0
 
         # validity byte
         # observation is: noise, beta, bsr all are integers32
@@ -74,7 +74,8 @@ class Coordinator():
             i = 0
             seed = i * 35
             num_episodes = 1100
-            results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
+            # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
+            results_file = '/tmp/real_enb_results.csv'
             load_pretrained_weights = False
             pretrained_weights_path = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'
 
@@ -108,17 +109,25 @@ class Coordinator():
                 'learning_rate': 1e-3,
                 'linear_hidden_units': [5, 32, 64, 100],
                 'num_actor_outputs': 1,
-                'final_layer_activation': ['softmax', None],
+                'use_state_value_critic': False,
+                'final_layer_activation': ['softmax'],
                 'batch_size': 64,
                 'local_update_period': 1, # in episodes
                 'include_entropy_term': True,
                 'entropy_beta': 0.1,
-                'entropy_contrib_prob': 0.999,
+                'entropy_contrib_prob': 0.9999,
                 'Actor': {
                     'linear_hidden_units': [100, 40]
                 },
-                'Critic': {
+                'State_Value_Critic': {
                     'linear_hidden_units': [16, 4]
+                },
+                'Action_Value_Critic': {
+                    'linear_hidden_units': [16, 100, 100, 100, 32],
+                    'final_layer_activation': 'softmax',
+                    'vmin': -5, 
+                    'vmax': 4,
+                    'n_atoms': 20 
                 }
             }
         }

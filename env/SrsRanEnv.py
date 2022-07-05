@@ -1,7 +1,4 @@
 from multiprocessing import shared_memory
-from tokenize import Number
-import gym
-from gym import spaces
 import numpy as np
 
 from env.DecoderEnv import BaseEnv
@@ -49,7 +46,8 @@ class SrsRanEnv(BaseEnv):
             result = np.array([True, 1, 0])
         crc, decoding_time, tbs = result
         reward = super().get_reward(mcs, prb, crc, decoding_time, tbs)
-        print('{} - {}'.format(str(self), result.tolist() + [reward]))
+        if (self.verbose == 1):
+            print('{} - {}'.format(str(self), result.tolist() + [reward]))
         return super().get_agent_result(reward, mcs, prb, crc, decoding_time)
         
 

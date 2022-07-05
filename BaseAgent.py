@@ -72,22 +72,55 @@ class BaseAgent(object):
                                 kernel_initializer=tf.keras.initializers.GlorotNormal())(actor_output)
             outputs.append(actor_output)
 
-        critic_output = None
-        critic_linear_hidden_units = ac_common_params['Critic']['linear_hidden_units']
-        for neurons in critic_linear_hidden_units:
-            if critic_output is None:
-                inp = common
-            else:
-                inp = critic_output
-            critic_output = layers.Dense(neurons, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(inp)
-        if (critic_output is None):
-            critic_output = common
-        critic_output = layers.Dense(
-                            output_dim[-1],
-                            activation = final_layer_activation[-1],
-                            kernel_initializer=tf.keras.initializers.HeNormal())(critic_output)
-        outputs.append(critic_output)
-        return tf.keras.Model(inputs, outputs, name = name)
+        if ac_common_params['use_state_value_critic']:
+            critic_output = None
+            critic_linear_hidden_units = ac_common_params['State_Value_Critic']['linear_hidden_units']
+            for neurons in critic_linear_hidden_units:
+                if critic_output is None:
+                    inp = common
+                else:
+                    inp = critic_output
+                critic_output = layers.Dense(neurons, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(inp)
+            if (critic_output is None):
+                critic_output = common
+            critic_output = layers.Dense(
+                                output_dim[-1],
+                                activation = final_layer_activation[-1],
+                                kernel_initializer=tf.keras.initializers.HeNormal())(critic_output)
+            outputs.append(critic_output)
+
+        actor_n_state_value_critic = tf.keras.Model(inputs, outputs, name = name)
+        models = [actor_n_state_value_critic]
+
+        if not ac_common_params['use_state_value_critic']:
+            # means that we are using a action_value NN as critic
+            # inputs the state and the index of the selected action
+            action_min = 0
+            action_max = output_dim[idx_output]
+            action_variance = np.power(action_max - action_min , 2)
+
+            inputs = layers.Input(shape = (input_dim + 1), name = 'input_layer')
+            input_normalization = layers.Normalization(
+                                    axis = -1, 
+                                    mean = mean.tolist() + [action_min], 
+                                    variance = variance.tolist() + [action_variance]) (inputs)
+            common = None
+            for neurons in ac_common_params['Action_Value_Critic']['linear_hidden_units']:
+                if common is None:
+                    inp = input_normalization
+                else:
+                    inp = common
+                common = layers.Dense(neurons, activation='relu', kernel_initializer = tf.keras.initializers.HeNormal())(inp)
+            if (common is None):
+                common = inputs
+            action_value_critic_output = layers.Dense(
+                                ac_common_params['Action_Value_Critic']['n_atoms'], 
+                                activation = ac_common_params['Action_Value_Critic']['final_layer_activation'],
+                                kernel_initializer=tf.keras.initializers.GlorotNormal())(common)
+            action_value_critic = tf.keras.Model(inputs, [action_value_critic_output], name = 'action_value_critic')
+            models.append(action_value_critic)
+
+        return models
 
     def step(self):
         raise ValueError("Step needs to be implemented by the agent")

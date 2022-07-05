@@ -29,7 +29,7 @@ decoder_env = DecoderEnv(
 config = Config()
 config.seed = 1
 config.environment = decoder_env
-config.num_episodes_to_run = 10e3
+config.num_episodes_to_run = 4
 config.randomise_random_seed = False
 config.runs_per_agent = 1
 config.save_results = True
@@ -41,7 +41,8 @@ config.hyperparameters = {
         'learning_rate': 1e-4,
         'linear_hidden_units': [5, 32, 64, 100],
         'num_actor_outputs': 1,
-        'final_layer_activation': ['softmax', None],
+        'use_state_value_critic': False,
+        'final_layer_activation': ['softmax'],
         'batch_size': 64,
         'include_entropy_term': True,
         'local_update_period': 1, # in episodes
@@ -50,8 +51,15 @@ config.hyperparameters = {
         'Actor': {
             'linear_hidden_units': [100, 40]
         },
-        'Critic': {
+        'State_Value_Critic': {
             'linear_hidden_units': [16, 4]
+        },
+        'Action_Value_Critic': {
+            'linear_hidden_units': [16, 100, 100, 100, 32],
+            'final_layer_activation': 'softmax',
+            'vmin': -5, 
+            'vmax': 4,
+            'n_atoms': 20 
         }
     },
         
@@ -77,9 +85,10 @@ for beta_range, beta in zip([beta_high], ['all']):
             config = copy.deepcopy(config)
             config.seed = seed
             config.environment = decoder_env
-            save_folder = '/home/naposto/phd/nokia/agent_models/model_v2/model_training_output.csv'
-            config.results_file_path = save_folder.format(run_idx)
-            config.save_weights = True
-            config.save_weights_file = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'.format(run_idx)
-            A3C_Agent = A3CAgent(config, 8)
+            # save_folder = '/home/naposto/phd/nokia/agent_models/model_v2/model_training_output.csv'
+            # config.results_file_path = save_folder.format(run_idx)
+            config.results_file_path = '/tmp/dt_twin.csv'
+            config.save_weights = False
+            # config.save_weights_file = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'.format(run_idx)
+            A3C_Agent = A3CAgent(config, 1)
             A3C_Agent.run_n_episodes()
