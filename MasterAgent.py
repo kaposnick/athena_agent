@@ -1,5 +1,5 @@
 import multiprocessing as mp
-from agents.BaseAgent import BaseAgent
+from BaseAgent import BaseAgent
 
 from common_utils import get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
 import random

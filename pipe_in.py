@@ -50,6 +50,10 @@ class Coordinator():
         self.sched_proc = mp.Process(target=self.rcv_obs_send_act_func, name= 'scheduler_intf')
         self.decod_proc = mp.Process(target=self.rcv_return_func, name='decoder_intf')
 
+        self.cond_observations = [mp.Condition() for _ in range(self.total_agents)]
+        self.cond_actions      = [mp.Condition() for _ in range(self.total_agents)]
+        self.cond_rewards      = [mp.Condition() for _ in range(self.total_agents)]
+
     def kill_all(self):
         print('Killing coordinator')
         self.a3c_agent.kill_all()
@@ -106,12 +110,12 @@ class Coordinator():
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
-                'learning_rate': 1e-3,
+                'learning_rate': 1e-4,
                 'linear_hidden_units': [5, 32, 64, 100],
                 'num_actor_outputs': 1,
                 'use_state_value_critic': False,
                 'final_layer_activation': ['softmax'],
-                'batch_size': 64,
+                'batch_size': 32,
                 'local_update_period': 1, # in episodes
                 'include_entropy_term': True,
                 'entropy_beta': 0.1,
@@ -125,7 +129,7 @@ class Coordinator():
                 'Action_Value_Critic': {
                     'linear_hidden_units': [16, 100, 100, 100, 32],
                     'final_layer_activation': 'softmax',
-                    'vmin': -5, 
+                    'vmin': -15, 
                     'vmax': 4,
                     'n_atoms': 20 
                 }
@@ -137,7 +141,15 @@ class Coordinator():
     def start(self):
         self.sched_proc.start()
         self.decod_proc.start()
-        self.a3c_agent.run_n_episodes(self.processes_started_successfully)
+        inputs = []
+        for idx in range(self.total_agents):
+            input = {
+                'cond_observation': self.cond_observations[idx],
+                'cond_action': self.cond_actions[idx],
+                'cond_reward': self.cond_rewards[idx],
+            }
+            inputs.append(input)
+        self.a3c_agent.run_n_episodes(self.processes_started_successfully, inputs)
         self.sched_proc.join()
         self.decod_proc.join()
 
@@ -174,7 +186,10 @@ class Coordinator():
                         agent_idx = tti % self.total_agents
                         if (self.verbose == 1):
                             print('Res {} - {}'.format(agent_idx, result_buffer))
-                        self.reward_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *result_buffer], dtype=np.int32)
+                        cond_reward = self.cond_rewards[agent_idx]
+                        with cond_reward:
+                            self.reward_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *result_buffer], dtype=np.int32)
+                            cond_reward.notify()
             except FileNotFoundError as e:
                 pass
                 
@@ -220,10 +235,15 @@ class Coordinator():
                             observation = [noise, beta, bsr]
                             if (self.verbose == 1):
                                 print('Obs {} - {}'.format(agent_idx, observation))
-                            self.observation_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *observation], dtype=np.int32)
+                            cond_observation = self.cond_observations[agent_idx]
+                            cond_action      = self.cond_actions[agent_idx]
+                            with cond_observation:
+                                self.observation_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *observation], dtype=np.int32)
+                                cond_observation.notify()
 
-                            while self.action_nd_array[agent_idx * 3]  == 0:
-                                pass
+                            with cond_action:
+                                while self.action_nd_array[agent_idx * 3]  == 0:
+                                    cond_action.wait(0.1)
 
                             self.action_nd_array[agent_idx * 3 ] = 0
                             mcs, prb = self.action_nd_array[agent_idx * 3 + 1].item(), self.action_nd_array[agent_idx * 3 + 2].item()

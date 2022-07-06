@@ -51,15 +51,33 @@ class BaseEnv(gym.Env):
             dtype = np.float32
         )
 
+        import json
+        tbs_table_path = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.json'
+        with open(tbs_table_path) as tbs_json:
+            self.tbs_table = json.load(tbs_json)  
+
         if (self.policy_output_format == "mcs_prb_joint"):
             self.action_array = []
             self.action_array.append( np.array( [0, 0] ) )
+            mapping_array = [{
+                'tbs': 0,
+                'mcs': 0.0,
+                'prb': 0.0
+            }]
             for mcs in MCS_SPACE:
                 for prb in PRB_SPACE:
                     combo = ( I_MCS_TO_I_TBS[int(mcs)], int(prb) - 1)
                     if combo in PROHIBITED_COMBOS:
                         continue
-                    self.action_array.append( np.array( [mcs, prb] ) )
+                    # self.action_array.append( np.array( [mcs, prb] ) )
+                    mapping_array.append(
+                        {   
+                            'tbs': self.to_tbs(int(mcs), int(prb)),
+                            'mcs': mcs,
+                            'prb': prb
+                        }
+                    )
+            self.action_array = [np.array([x['mcs'], x['prb']]) for x in sorted(mapping_array, key = lambda el: (el['tbs'], el['mcs']))]
             self.action_space = spaces.Discrete(len(self.action_array))
             self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
             self.fn_calculate_mean = self.fn_mcs_prb_joint_mean_calculation
@@ -71,6 +89,9 @@ class BaseEnv(gym.Env):
             self.fn_calculate_mean = self.fn_mcs_prb_independent_mean_calculation
         else:
             raise Exception("Not allowed policy output format: " + str(self.policy_output_format))
+
+    def presetup(self, inputs):
+        pass
 
     def setup(self, agent_idx, total_agents):
         self.set_title('worker_{}'.format(agent_idx))
@@ -128,7 +149,7 @@ class BaseEnv(gym.Env):
                      { 'period': 1, 'value': np.round(dec_time_ok, 3) },
                      { 'period': 1, 'value': int(dec_time_mean)},
                      { 'period': 1, 'value': int(dec_time_std)},
-                     { 'period': 100, 'value': mcs_prb }  ]
+                     { 'period': 20, 'value': mcs_prb }  ]
         elif (self.policy_output_format == "mcs_prb_independent"):
             mcs_probs = probs[0]
             mcs_result = [action_prob.numpy() for action_prob in mcs_probs]
@@ -151,10 +172,10 @@ class BaseEnv(gym.Env):
             reward = -1 * self.penalty
         else:
             if (not crc):
-                reward = - 5
+                reward = - 15
             else:
                 if (decoding_time > self.decode_deadline):
-                    reward += max((self.decode_deadline - decoding_time) / 100, -5)
+                    reward += max((self.decode_deadline - decoding_time) / 100, -15)
                 if (tbs is None):
                     tbs = self.to_tbs(mcs, prb) # in KBs
                 reward += (tbs / ( 8 * 1024))

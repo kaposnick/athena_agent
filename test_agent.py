@@ -55,7 +55,7 @@ config.hyperparameters = {
             'linear_hidden_units': [16, 4]
         },
         'Action_Value_Critic': {
-            'linear_hidden_units': [16, 100, 100, 100, 32],
+            'linear_hidden_units': [16, 32, 32],
             'final_layer_activation': 'softmax',
             'vmin': -5, 
             'vmax': 4,

@@ -1,3 +1,4 @@
+import multiprocessing as mp
 from multiprocessing import shared_memory
 import numpy as np
 
@@ -15,7 +16,15 @@ class SrsRanEnv(BaseEnv):
             penalty = penalty,
             policy_output_format = policy_output_format,
             title = title, 
-            verbose = verbose)
+            verbose = verbose)        
+
+    def presetup(self, inputs):
+        cond_observation = inputs['cond_observation']
+        cond_action = inputs['cond_action']
+        cond_reward = inputs['cond_reward']
+        self.cond_observation = cond_observation
+        self.cond_action = cond_action
+        self.cond_reward = cond_reward
 
     def setup(self, agent_idx, total_agents):
         super().setup(agent_idx, total_agents)
@@ -34,11 +43,15 @@ class SrsRanEnv(BaseEnv):
         
     def step(self, action):        
         mcs, prb = super().translate_action(action)
-        self.action_nd_array[:] = np.array([1, mcs, prb], dtype=np.int32)
+        with self.cond_action:
+            self.action_nd_array[:] = np.array([1, mcs, prb], dtype=np.int32)
+            self.cond_action.notify()
         if (self.verbose == 1):
             print('{} - Act: {}'.format(str(self), action))
         if (prb > 0):
-            while self.result_nd_array[0] == 0:
+            with self.cond_reward:
+                while self.result_nd_array[0] == 0:
+                    self.cond_reward.wait(0.1)
                 pass
             result = self.result_nd_array[1:]
             self.result_nd_array[0] = 0
@@ -52,11 +65,12 @@ class SrsRanEnv(BaseEnv):
         
 
     def reset(self):
-        while self.observation_nd_array[0] == 0:
-            pass
-        super().set_observation(self.observation_nd_array[1:][:self.input_dims])
+        with self.cond_observation:
+            while self.observation_nd_array[0] == 0:
+                self.cond_observation.wait(0.1)
+        self.observation_nd_array[0] = 0
+        super().set_observation(self.observation_nd_array[1:][:self.input_dims].tolist())
         if (self.verbose == 1):
             print('{} - Obs: {}'.format(str(self), self.observation))
-        self.observation_nd_array[0] = 0
         return super().get_observation()
         

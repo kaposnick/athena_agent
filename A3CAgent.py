@@ -7,7 +7,7 @@ import BaseAgent
 import multiprocessing as mp
 from BaseAgent import BaseAgent
 from WorkerAgent import Actor_Critic_Worker
-from agents.MasterAgent import Master_Agent
+from MasterAgent import Master_Agent
 from common_utils import import_tensorflow
 
 COL_DT_AC_LOSS_MEAN = 'ac_loss_mean'
@@ -43,7 +43,7 @@ class A3CAgent(BaseAgent):
             shm = shared_memory.SharedMemory(name = memory_name, create = False, size = memory_size)
         return shm
 
-    def run_n_episodes(self, processes_started_successfully = None):
+    def run_n_episodes(self, processes_started_successfully = None, inputs = None):
         results_queue                     = mp.Queue()
         gradient_updates_queue            = mp.Queue()
         optimizer_lock                    = mp.Lock()
@@ -93,6 +93,8 @@ class A3CAgent(BaseAgent):
             for worker_num in range(self.num_processes):
                 import copy
                 worker_environment = copy.deepcopy(self.environment)
+                if (inputs is not None):
+                    worker_environment.presetup(inputs[worker_num])
                 worker = Actor_Critic_Worker(
                     worker_environment, self.config, 
                     worker_num, self.num_processes,
