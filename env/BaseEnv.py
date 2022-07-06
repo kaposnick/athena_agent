@@ -38,7 +38,7 @@ class BaseEnv(gym.Env):
                 verbose: Number,
                 decode_deadline = 3000) -> None:
         super(BaseEnv, self).__init__()
-        self.penalty = penalty
+        self.min_penalty = penalty
         self.policy_output_format = policy_output_format
         self.title = title
         self.verbose = verbose
@@ -69,7 +69,6 @@ class BaseEnv(gym.Env):
                     combo = ( I_MCS_TO_I_TBS[int(mcs)], int(prb) - 1)
                     if combo in PROHIBITED_COMBOS:
                         continue
-                    # self.action_array.append( np.array( [mcs, prb] ) )
                     mapping_array.append(
                         {   
                             'tbs': self.to_tbs(int(mcs), int(prb)),
@@ -77,7 +76,7 @@ class BaseEnv(gym.Env):
                             'prb': prb
                         }
                     )
-            self.action_array = [np.array([x['mcs'], x['prb']]) for x in sorted(mapping_array, key = lambda el: (el['tbs'], el['mcs']))]
+            self.action_array = [np.array([x['mcs'], x['prb']]) for x in sorted(mapping_array, key = lambda el: (el['tbs'], el['mcs']))] # sort by tbs/mcs
             self.action_space = spaces.Discrete(len(self.action_array))
             self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
             self.fn_calculate_mean = self.fn_mcs_prb_joint_mean_calculation
@@ -117,7 +116,9 @@ class BaseEnv(gym.Env):
 
     def get_csv_result_policy_output_columns(self) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):
-            columns = ['crc_ok', 'dec_time_ok', 'dec_time_mean', 'dec_time_std', 'mcs_prb']
+            columns = ['crc_ok', 
+                    'dec_time_ok_ratio', 'dec_time_ok_mean', 'dec_time_ok_std', 'dec_time_ko_mean', 'dec_time_ko_std', 
+                    'throughput_ok_mean', 'throughput_ok_std', 'throughput_ko_mean', 'throughput_ko_std', 'mcs_prb']
             return columns
         elif (self.policy_output_format == "mcs_prb_independent"):
             columns = ['mcs', 'prb']
@@ -131,25 +132,48 @@ class BaseEnv(gym.Env):
 
             num_crc_ok = 0
             num_dec_time_ok = 0
-            dec_times = []
+            dec_times_ok = []
+            dec_times_ko = []
             len_infos = len(infos)
+            throughput_ok = []
+            throughput_ko = []
             for info in infos:
                 crc = info['crc']
                 dec_time = info['decoding_time']
+                tbs = info['tbs']
                 if crc:
                     num_crc_ok += 1
                 if dec_time < self.decode_deadline:
                     num_dec_time_ok += 1
-                dec_times.append(dec_time)
+                    dec_times_ok.append(dec_time)
+                else:
+                    dec_times_ko.append(dec_time)
+
+                if (crc and dec_time < self.decode_deadline):
+                    throughput_ok.append(tbs)
+                else:
+                    throughput_ko.append(tbs)
             crc_ok = num_crc_ok / len_infos if len_infos > 0 else -1
-            dec_time_ok = num_dec_time_ok / len_infos if len_infos > 0 else -1
-            dec_time_mean = np.mean(dec_times)
-            dec_time_std = np.std(dec_times)
+            dec_time_ok_ratio = num_dec_time_ok / len_infos if len_infos > 0 else -1
+            dec_time_ok_mean = np.mean(dec_times_ok) if len(dec_times_ok) > 0 else -1
+            dec_time_ok_std = np.std(dec_times_ok)   if len(dec_times_ok) > 0 else -1
+            dec_time_ko_mean = np.mean(dec_times_ko) if len(dec_times_ko) > 0 else -1
+            dec_time_ko_std = np.std(dec_times_ko)   if len(dec_times_ko) > 0 else -1
+            throughput_ok_mean = np.mean(throughput_ok) / (8*1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
+            throughput_ok_std = np.std(throughput_ok)   / (8*1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
+            throughput_ko_mean = np.mean(throughput_ko) / (8*1024 * 1024) * 1000 if len(throughput_ko) > 0 else -1
+            throughput_ko_std = np.std(throughput_ko)   / (8*1024 * 1024) * 1000 if len(throughput_ko) > 0 else -1
             return [ { 'period': 1, 'value': np.round(crc_ok, 3) }, 
-                     { 'period': 1, 'value': np.round(dec_time_ok, 3) },
-                     { 'period': 1, 'value': int(dec_time_mean)},
-                     { 'period': 1, 'value': int(dec_time_std)},
-                     { 'period': 20, 'value': mcs_prb }  ]
+                     { 'period': 1, 'value': np.round(dec_time_ok_ratio, 3) },
+                     { 'period': 1, 'value': int(dec_time_ok_mean)},
+                     { 'period': 1, 'value': int(dec_time_ok_std)},
+                     { 'period': 1, 'value': int(dec_time_ko_mean)},
+                     { 'period': 1, 'value': int(dec_time_ko_std)},
+                     { 'period': 1, 'value': np.round(throughput_ok_mean, 3)},
+                     { 'period': 1, 'value': np.round(throughput_ok_std , 3)},
+                     { 'period': 1, 'value': np.round(throughput_ko_mean, 3)},
+                     { 'period': 1, 'value': np.round(throughput_ko_std , 3)},
+                     { 'period': 50, 'value': mcs_prb }  ]
         elif (self.policy_output_format == "mcs_prb_independent"):
             mcs_probs = probs[0]
             mcs_result = [action_prob.numpy() for action_prob in mcs_probs]
@@ -168,21 +192,22 @@ class BaseEnv(gym.Env):
 
     def get_reward(self, mcs, prb, crc, decoding_time, tbs = None):
         reward = 0
+        tbs = None
         if ( prb > 0 and (I_MCS_TO_I_TBS[mcs], prb - 1) in PROHIBITED_COMBOS):
-            reward = -1 * self.penalty
+            reward = -1 * self.min_penalty
         else:
             if (not crc):
-                reward = - 15
+                reward = -1 * self.min_penalty
             else:
                 if (decoding_time > self.decode_deadline):
-                    reward += max((self.decode_deadline - decoding_time) / 100, -15)
+                    reward += max((self.decode_deadline - decoding_time) / 100, -1 * self.min_penalty)
                 if (tbs is None):
                     tbs = self.to_tbs(mcs, prb) # in KBs
                 reward += (tbs / ( 8 * 1024))
-        return reward
+        return reward, tbs
 
-    def get_agent_result(self, reward, mcs, prb, crc, decoding_time):
-        return None, reward, True, {'mcs': mcs, 'prb': prb, 'crc': crc, 'decoding_time': decoding_time}
+    def get_agent_result(self, reward, mcs, prb, crc, decoding_time, tbs):
+        return None, reward, True, {'mcs': mcs, 'prb': prb, 'crc': crc, 'decoding_time': decoding_time, 'tbs': tbs}
 
     def fn_mcs_prb_joint_action_translation(self, action) -> tuple:
         # in this case action is [action_idx]

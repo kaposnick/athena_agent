@@ -115,7 +115,7 @@ class BaseAgent(object):
                                 output_dim[0] * n_atoms, 
                                 activation = ac_common_params['Action_Value_Critic']['final_layer_activation'],
                                 kernel_initializer=tf.keras.initializers.GlorotNormal())(common)
-            action_value_critic_output = layers.Reshape((-1, n_atoms)) (action_value_critic)
+            action_value_critic_output = layers.Reshape((-1, n_atoms)) (action_value_critic_output)
             action_value_critic = tf.keras.Model(inputs, [action_value_critic_output], name = 'action_value_critic')
             models.append(action_value_critic)
 

@@ -130,8 +130,8 @@ class DecoderEnv(BaseEnv):
 
         crc = np.random.binomial(n = 1, p = decode_prob)[0][0] 
 
-        reward = super().get_reward(mcs, prb, crc, decoding_time)
-        result = super().get_agent_result(reward, mcs, prb, crc, decoding_time)
+        reward, tbs = super().get_reward(mcs, prb, crc, decoding_time)
+        result = super().get_agent_result(reward, mcs, prb, crc, decoding_time, tbs)
 
         if (self.version == 'probabilistic'):
             result[3]['decoding_time_mean'] = dcd_time_mean[0][0].numpy()

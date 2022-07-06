@@ -109,7 +109,7 @@ class Actor_Critic_Worker(mp.Process):
             if (self.use_action_value_critic):
                 self.critic.set_weights(copy.deepcopy(self.weights_critic))
 
-    def compute_critic_loss(self, tf, rewards, z):
+    def compute_critic_loss(self, tf, rewards, z, actions):
         atoms = rewards
         b = (atoms - self.vmin) / self.delta
         l = tf.math.floor(b)
@@ -131,12 +131,18 @@ class Actor_Critic_Worker(mp.Process):
         z_projected = tf.tensor_scatter_nd_add(tensor = z_projected, 
                                             indices = tf.concat([self.batch_range, u_cast], axis = 1), 
                                             updates = tf.squeeze(tf.gather(upper, u_cast, batch_dims = 1)))
+        z = tf.stack([sample_z[sample_action[0]] for sample_z, sample_action in zip(z, actions)])
         critic_loss = -1 * tf.reduce_mean(tf.reduce_sum((z_projected * tf.math.log(z)), axis = -1))
         return critic_loss
         
 
     def compute_actor_loss(self, tf, rewards, z):
-        mean_critic_value = tf.linalg.matmul(z, self.atoms_range)
+        """
+            rewards: tf.Tensor with shape (batch_size, 1)
+            z:       tf.Tensor with shape (batch_size, n_actions, n_atoms)
+        """
+        mean_critic_value = tf.linalg.matmul(z, self.atoms_range) # (batch_size, n_actions, 1)
+        mean_critic_value = tf.reduce_mean(mean_critic_value, axis = [1])
         advantage = rewards - mean_critic_value
 
         tensor_batch_action = tf.convert_to_tensor(self.batch_action) 
@@ -151,28 +157,32 @@ class Actor_Critic_Worker(mp.Process):
 
         actor_loss_inside_term = joint_action_logp * advantage # [batch_size x 1]
         
+        entropy = -1 * tf.expand_dims(
+            tf.reduce_sum(tf.math.xlogy(tensor_batch_p, tensor_batch_p), axis = 1),
+            axis = 1
+        )                        
         if (self.include_entropy_term):
-            entropy = -1 * tf.expand_dims(
-                tf.reduce_sum(tf.math.xlogy(tensor_batch_p, tensor_batch_p), axis = 1),
-                axis = 1
-            )                        
             entropy_contribution = np.random.binomial(1, np.power(self.entropy_contrib_prob, self.ep_ix))
             actor_loss_inside_term += entropy_contribution * self.entropy_beta * entropy
         actor_loss = -1 * tf.reduce_mean(actor_loss_inside_term)
+        info_entropy = np.mean(entropy)
 
-        info = {'tensor_batch_p': tensor_batch_p}
-        if (self.include_entropy_term):
-            info['entropy'] = entropy
+        info = {
+            'tensor_batch_p': tensor_batch_p, 
+            'entropy':        info_entropy
+        }
+        
         return actor_loss, info
 
     def compute_losses(self, tf):
         rewards = tf.expand_dims(tf.convert_to_tensor(self.batch_rewards, dtype = tf.float32), axis = 1) # (batch_size, 1)
+        actions = tf.convert_to_tensor(self.batch_action)
         z = tf.squeeze(tf.convert_to_tensor(self.batch_critic_outputs, dtype = tf.float32))              # (batch_size, actions, atoms)
 
         actor_loss, actor_info  = self.compute_actor_loss(tf, rewards, z)
         critic_loss = None
         if (self.use_action_value_critic):
-            critic_loss = self.compute_critic_loss(tf, rewards, z)
+            critic_loss = self.compute_critic_loss(tf, rewards, z, actions)
         
         ret_info = {
             'tensor_batch_p': actor_info['tensor_batch_p'],
@@ -197,13 +207,12 @@ class Actor_Critic_Worker(mp.Process):
         probs_batched = [tf.reduce_mean(tensor_batch_p, axis = 0)]
                 
         rew_mean = np.mean(self.batch_rewards)
-        entropy_mean = np.mean(entropy)
         mcs_mean, prb_mean = self.environment.calculate_mean(probs_batched)
         additional_columns = self.environment.get_csv_result_policy_output(probs_batched, self.batch_info)
 
         with self.write_to_results_queue_lock:
             self.episode_number.value += 1
-            self.results_queue.put([ [self.worker_num, rew_mean, entropy_mean, mcs_mean, prb_mean, actor_loss, critic_loss], additional_columns ])
+            self.results_queue.put([ [self.worker_num, rew_mean, entropy, mcs_mean, prb_mean, actor_loss, critic_loss], additional_columns ])
 
 
     def run(self) -> None:

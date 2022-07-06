@@ -58,10 +58,12 @@ class SrsRanEnv(BaseEnv):
         else:
             result = np.array([True, 1, 0])
         crc, decoding_time, tbs = result
-        reward = super().get_reward(mcs, prb, crc, decoding_time, tbs)
+        reward, _ = super().get_reward(mcs, prb, crc, decoding_time, tbs)
         if (self.verbose == 1):
             print('{} - {}'.format(str(self), result.tolist() + [reward]))
-        return super().get_agent_result(reward, mcs, prb, crc, decoding_time)
+        
+        result = super().get_agent_result(reward, mcs, prb, crc, decoding_time, tbs)
+        return result
         
 
     def reset(self):

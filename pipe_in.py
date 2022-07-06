@@ -93,7 +93,7 @@ class Coordinator():
 
         config = Config()
         config.seed = seed
-        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, input_dims = 2)
+        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 5, input_dims = 2)
         config.num_episodes_to_run = num_episodes
         config.save_results = True
         config.results_file_path = results_file
@@ -117,7 +117,7 @@ class Coordinator():
                 'final_layer_activation': ['softmax'],
                 'batch_size': 32,
                 'local_update_period': 1, # in episodes
-                'include_entropy_term': True,
+                'include_entropy_term': False,
                 'entropy_beta': 0.1,
                 'entropy_contrib_prob': 0.9999,
                 'Actor': {
@@ -127,11 +127,11 @@ class Coordinator():
                     'linear_hidden_units': [16, 4]
                 },
                 'Action_Value_Critic': {
-                    'linear_hidden_units': [16, 100, 100, 100, 32],
+                    'linear_hidden_units': [16, 100, 600, 600],
                     'final_layer_activation': 'softmax',
-                    'vmin': -15, 
+                    'vmin': -5, 
                     'vmax': 4,
-                    'n_atoms': 20 
+                    'n_atoms': 10
                 }
             }
         }

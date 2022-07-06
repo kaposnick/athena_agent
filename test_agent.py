@@ -59,7 +59,7 @@ config.hyperparameters = {
             'final_layer_activation': 'softmax',
             'vmin': -5, 
             'vmax': 4,
-            'n_atoms': 20 
+            'n_atoms': 10
         }
     },
         
@@ -78,7 +78,8 @@ for beta_range, beta in zip([beta_high], ['all']):
             policy_output_format = 'mcs_prb_joint',
             version='probabilistic',
             sample_strategy = 'percentile_99',
-            input_dims=2
+            input_dims=2,
+            penalty=5
         )
         for run_idx in range(config.runs_per_agent):
             seed = run_idx * 32 + 1
