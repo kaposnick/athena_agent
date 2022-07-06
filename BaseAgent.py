@@ -95,15 +95,12 @@ class BaseAgent(object):
         if not ac_common_params['use_state_value_critic']:
             # means that we are using a action_value NN as critic
             # inputs the state and the index of the selected action
-            action_min = 0
-            action_max = output_dim[idx_output]
-            action_variance = np.power(action_max - action_min , 2)
 
-            inputs = layers.Input(shape = (input_dim + 1), name = 'input_layer')
+            inputs = layers.Input(shape = (input_dim), name = 'input_layer')
             input_normalization = layers.Normalization(
                                     axis = -1, 
-                                    mean = mean.tolist() + [action_min], 
-                                    variance = variance.tolist() + [action_variance]) (inputs)
+                                    mean = mean, 
+                                    variance = variance) (inputs)
             common = None
             for neurons in ac_common_params['Action_Value_Critic']['linear_hidden_units']:
                 if common is None:
@@ -113,10 +110,12 @@ class BaseAgent(object):
                 common = layers.Dense(neurons, activation='relu', kernel_initializer = tf.keras.initializers.HeNormal())(inp)
             if (common is None):
                 common = inputs
+            n_atoms = ac_common_params['Action_Value_Critic']['n_atoms']
             action_value_critic_output = layers.Dense(
-                                ac_common_params['Action_Value_Critic']['n_atoms'], 
+                                output_dim[0] * n_atoms, 
                                 activation = ac_common_params['Action_Value_Critic']['final_layer_activation'],
                                 kernel_initializer=tf.keras.initializers.GlorotNormal())(common)
+            action_value_critic_output = layers.Reshape((-1, n_atoms)) (action_value_critic)
             action_value_critic = tf.keras.Model(inputs, [action_value_critic_output], name = 'action_value_critic')
             models.append(action_value_critic)
 

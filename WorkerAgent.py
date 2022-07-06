@@ -167,7 +167,7 @@ class Actor_Critic_Worker(mp.Process):
 
     def compute_losses(self, tf):
         rewards = tf.expand_dims(tf.convert_to_tensor(self.batch_rewards, dtype = tf.float32), axis = 1) # (batch_size, 1)
-        z = tf.squeeze(tf.convert_to_tensor(self.batch_critic_outputs, dtype = tf.float32))              # (batch_size, atoms)
+        z = tf.squeeze(tf.convert_to_tensor(self.batch_critic_outputs, dtype = tf.float32))              # (batch_size, actions, atoms)
 
         actor_loss, actor_info  = self.compute_actor_loss(tf, rewards, z)
         critic_loss = None
@@ -267,8 +267,8 @@ class Actor_Critic_Worker(mp.Process):
         actor_sample = tf.random.categorical(actor_output_log_probs, num_samples = 1) 
         action = [actor_sample[0][0].numpy()]
         if (self.use_action_value_critic):
-            tensor_state = tf.convert_to_tensor([state + action])
-            critic_output = self.critic(tensor_state)
+            tensor_state = tf.convert_to_tensor([state])
+            critic_output = self.critic(tensor_state) # n_actions * n_atoms
         return action, actor_output_log_probs, critic_output   
 
 
