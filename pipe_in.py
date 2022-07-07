@@ -129,8 +129,8 @@ class Coordinator():
                 'Action_Value_Critic': {
                     'linear_hidden_units': [16, 100, 600, 600],
                     'final_layer_activation': 'softmax',
-                    'vmin': -5, 
-                    'vmax': 4,
+                    'vmin': -5.5, 
+                    'vmax': 3.5,
                     'n_atoms': 10
                 }
             }

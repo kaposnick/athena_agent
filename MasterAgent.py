@@ -105,6 +105,7 @@ class Master_Agent(mp.Process):
             self.master_agent_initialized.value = 1
 
             actor_critic_optimizer = tf.keras.optimizers.Adam(learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate'])
+            critic_optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-3)
             gradient_calculation_idx = 0
             while True:
                 import queue
@@ -117,7 +118,7 @@ class Master_Agent(mp.Process):
                     )
                     if (self.use_action_value_critic):
                         critic_gradients = gradients[1]
-                        actor_critic_optimizer.apply_gradients(
+                        critic_optimizer.apply_gradients(
                             zip(critic_gradients, self.critic.trainable_weights)
                         )
 

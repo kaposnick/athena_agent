@@ -195,14 +195,13 @@ class BaseEnv(gym.Env):
         tbs = None
         if ( prb > 0 and (I_MCS_TO_I_TBS[mcs], prb - 1) in PROHIBITED_COMBOS):
             reward = -1 * self.min_penalty
+            return reward, None
         else:
-            if (not crc):
+            if tbs is None:
+                tbs = self.to_tbs(mcs, prb)
+            if (not crc or decoding_time > self.decode_deadline):
                 reward = -1 * self.min_penalty
             else:
-                if (decoding_time > self.decode_deadline):
-                    reward += max((self.decode_deadline - decoding_time) / 100, -1 * self.min_penalty)
-                if (tbs is None):
-                    tbs = self.to_tbs(mcs, prb) # in KBs
                 reward += (tbs / ( 8 * 1024))
         return reward, tbs
 

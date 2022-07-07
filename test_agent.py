@@ -29,7 +29,7 @@ decoder_env = DecoderEnv(
 config = Config()
 config.seed = 1
 config.environment = decoder_env
-config.num_episodes_to_run = 4
+config.num_episodes_to_run = 1000
 config.randomise_random_seed = False
 config.runs_per_agent = 1
 config.save_results = True
@@ -57,8 +57,8 @@ config.hyperparameters = {
         'Action_Value_Critic': {
             'linear_hidden_units': [16, 32, 32],
             'final_layer_activation': 'softmax',
-            'vmin': -5, 
-            'vmax': 4,
+            'vmin': -5.5, 
+            'vmax': 3.5,
             'n_atoms': 10
         }
     },

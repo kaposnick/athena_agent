@@ -131,8 +131,8 @@ class Actor_Critic_Worker(mp.Process):
         z_projected = tf.tensor_scatter_nd_add(tensor = z_projected, 
                                             indices = tf.concat([self.batch_range, u_cast], axis = 1), 
                                             updates = tf.squeeze(tf.gather(upper, u_cast, batch_dims = 1)))
-        z = tf.stack([sample_z[sample_action[0]] for sample_z, sample_action in zip(z, actions)])
-        critic_loss = -1 * tf.reduce_mean(tf.reduce_sum((z_projected * tf.math.log(z)), axis = -1))
+        z_stacked = tf.stack([sample_z[sample_action[0]] for sample_z, sample_action in zip(z, actions)])
+        critic_loss = -1 * tf.reduce_mean(tf.reduce_sum((z_projected * tf.math.log(z_stacked)), axis = -1))
         return critic_loss
         
 
