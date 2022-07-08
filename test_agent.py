@@ -49,7 +49,7 @@ config.hyperparameters = {
         'entropy_beta': 0.1,
         'entropy_contrib_prob': 1,
         'Actor': {
-            'linear_hidden_units': [100, 40]
+            'linear_hidden_units': [512, 1024, 1024]
         },
         'State_Value_Critic': {
             'linear_hidden_units': [16, 4]
@@ -57,16 +57,16 @@ config.hyperparameters = {
         'Action_Value_Critic': {
             'linear_hidden_units': [16, 32, 32],
             'final_layer_activation': 'softmax',
-            'vmin': -5.5, 
+            'vmin': -5, 
             'vmax': 3.5,
-            'n_atoms': 10
+            'n_atoms': 8
         }
     },
         
 }
 
 import copy
-for beta_range, beta in zip([beta_high], ['all']):
+for beta_range, beta in zip([beta_low], ['all']):
     for noise_range, noise in zip([noise_low], ['all']):
         decoder_env = DecoderEnv(
             decoder_model_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/crc_ce_dcd_time_prob.h5',
@@ -79,7 +79,7 @@ for beta_range, beta in zip([beta_high], ['all']):
             version='probabilistic',
             sample_strategy = 'percentile_99',
             input_dims=2,
-            penalty=5
+            penalty=4.99
         )
         for run_idx in range(config.runs_per_agent):
             seed = run_idx * 32 + 1
@@ -91,5 +91,5 @@ for beta_range, beta in zip([beta_high], ['all']):
             config.results_file_path = '/tmp/dt_twin.csv'
             config.save_weights = False
             # config.save_weights_file = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'.format(run_idx)
-            A3C_Agent = A3CAgent(config, 1)
+            A3C_Agent = A3CAgent(config, 8)
             A3C_Agent.run_n_episodes()

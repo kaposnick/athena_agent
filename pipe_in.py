@@ -115,22 +115,22 @@ class Coordinator():
                 'num_actor_outputs': 1,
                 'use_state_value_critic': False,
                 'final_layer_activation': ['softmax'],
-                'batch_size': 32,
+                'batch_size': 64,
                 'local_update_period': 1, # in episodes
-                'include_entropy_term': False,
+                'include_entropy_term': True,
                 'entropy_beta': 0.1,
-                'entropy_contrib_prob': 0.9999,
+                'entropy_contrib_prob': 0.995,
                 'Actor': {
-                    'linear_hidden_units': [100, 40]
+                    'linear_hidden_units': [512, 1024, 1024]
                 },
                 'State_Value_Critic': {
                     'linear_hidden_units': [16, 4]
                 },
                 'Action_Value_Critic': {
-                    'linear_hidden_units': [16, 100, 600, 600],
+                    'linear_hidden_units': [16, 32, 32],
                     'final_layer_activation': 'softmax',
-                    'vmin': -5.5, 
-                    'vmax': 3.5,
+                    'vmin': -5.0001, 
+                    'vmax': 3.5001,
                     'n_atoms': 10
                 }
             }

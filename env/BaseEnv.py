@@ -159,10 +159,10 @@ class BaseEnv(gym.Env):
             dec_time_ok_std = np.std(dec_times_ok)   if len(dec_times_ok) > 0 else -1
             dec_time_ko_mean = np.mean(dec_times_ko) if len(dec_times_ko) > 0 else -1
             dec_time_ko_std = np.std(dec_times_ko)   if len(dec_times_ko) > 0 else -1
-            throughput_ok_mean = np.mean(throughput_ok) / (8*1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
-            throughput_ok_std = np.std(throughput_ok)   / (8*1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
-            throughput_ko_mean = np.mean(throughput_ko) / (8*1024 * 1024) * 1000 if len(throughput_ko) > 0 else -1
-            throughput_ko_std = np.std(throughput_ko)   / (8*1024 * 1024) * 1000 if len(throughput_ko) > 0 else -1
+            throughput_ok_mean = np.mean(throughput_ok) / (1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
+            throughput_ok_std = np.std(throughput_ok)   / (1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
+            throughput_ko_mean = np.mean(throughput_ko) / (1024 * 1024) * 1000 if len(throughput_ko) > 0 else -1
+            throughput_ko_std = np.std(throughput_ko)   / (1024 * 1024) * 1000 if len(throughput_ko) > 0 else -1
             return [ { 'period': 1, 'value': np.round(crc_ok, 3) }, 
                      { 'period': 1, 'value': np.round(dec_time_ok_ratio, 3) },
                      { 'period': 1, 'value': int(dec_time_ok_mean)},

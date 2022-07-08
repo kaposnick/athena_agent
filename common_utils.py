@@ -2,11 +2,15 @@ import numpy as np
 from multiprocessing import shared_memory
 
 
-def import_tensorflow(debug_level: str):
+def import_tensorflow(debug_level: str, import_tfp = False):
     import os
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'    
     import tensorflow as tf
-    return tf, os
+
+    tfp = None
+    if (import_tfp):
+        import tensorflow_probability as tfp
+    return tf, os, tfp
 
 def get_shared_memory_ref(
         size, dtype, share_memory_name):

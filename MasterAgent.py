@@ -60,7 +60,7 @@ class Master_Agent(mp.Process):
             models = BaseAgent.create_NN(tf, 
                                 self.state_size, 
                                 [*self.action_size, 1], 
-                                self.config.hyperparameters)
+                                self.config.hyperparameters, tfp = self.tfp)
 
             self.actor = models[0]
             self.actor_memory_bytes.value, actor_dtype = self.compute_model_size(self.actor)
@@ -88,7 +88,7 @@ class Master_Agent(mp.Process):
             save_weights(self.critic, self.config.save_weights_file + '_critic.h5')
 
     def run(self):
-        tf, _ = import_tensorflow('3')
+        tf, _, self.tfp = import_tensorflow('3', True)
         self.set_process_seeds(tf)  
         exited_successfully = False
         try:
@@ -105,7 +105,6 @@ class Master_Agent(mp.Process):
             self.master_agent_initialized.value = 1
 
             actor_critic_optimizer = tf.keras.optimizers.Adam(learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate'])
-            critic_optimizer = tf.keras.optimizers.Adam(learning_rate = 1e-3)
             gradient_calculation_idx = 0
             while True:
                 import queue
@@ -117,8 +116,8 @@ class Master_Agent(mp.Process):
                         zip(actor_gradients, self.actor.trainable_weights)
                     )
                     if (self.use_action_value_critic):
-                        critic_gradients = gradients[1]
-                        critic_optimizer.apply_gradients(
+                        critic_gradients = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[1]]
+                        actor_critic_optimizer.apply_gradients(
                             zip(critic_gradients, self.critic.trainable_weights)
                         )
 

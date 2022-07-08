@@ -93,7 +93,7 @@ class DecoderEnv(BaseEnv):
 
     def setup(self, agent_idx, total_agents):
         super().setup(agent_idx, total_agents)
-        self.tf, _ = import_tensorflow('3')
+        self.tf, _, _ = import_tensorflow('3')
         if (self.version == 'probabilistic'):
             import tensorflow_probability as tfp
             self.tfp = tfp
