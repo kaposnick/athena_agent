@@ -15,24 +15,26 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
+        self.in_scheduling_mode = False
 
         # validity byte
         # observation is: noise, beta, bsr all are integers32
-        try:
-            shm_observation = shared_memory.SharedMemory(create = True,  name = 'observation', size = (16) * self.total_agents)
-        except Exception:
-            shm_observation = shared_memory.SharedMemory(create = False, name = 'observation', size = (16) * self.total_agents)
+        if (self.in_scheduling_mode):
+            try:
+                shm_observation = shared_memory.SharedMemory(create = True,  name = 'observation', size = (16) * self.total_agents)
+            except Exception:
+                shm_observation = shared_memory.SharedMemory(create = False, name = 'observation', size = (16) * self.total_agents)
 
-        nd_array = np.ndarray(shape=(4 * self.total_agents), dtype=np.int32, buffer=shm_observation.buf)
-        nd_array[:] = np.full(shape=(4 * self.total_agents), fill_value=0)
+            nd_array = np.ndarray(shape=(4 * self.total_agents), dtype=np.int32, buffer=shm_observation.buf)
+            nd_array[:] = np.full(shape=(4 * self.total_agents), fill_value=0)
 
-        try:
-            shm_action = shared_memory.SharedMemory(create = True,  name = 'action', size = (12) * self.total_agents)
-        except Exception:
-            shm_action = shared_memory.SharedMemory(create = False, name = 'action', size = (12) * self.total_agents)
+            try:
+                shm_action = shared_memory.SharedMemory(create = True,  name = 'action', size = (12) * self.total_agents)
+            except Exception:
+                shm_action = shared_memory.SharedMemory(create = False, name = 'action', size = (12) * self.total_agents)
 
-        nd_array = np.ndarray(shape=(3 * self.total_agents), dtype=np.int32, buffer=shm_action.buf)
-        nd_array[:] = np.full(shape=(3 * self.total_agents), fill_value=0)
+            nd_array = np.ndarray(shape=(3 * self.total_agents), dtype=np.int32, buffer=shm_action.buf)
+            nd_array[:] = np.full(shape=(3 * self.total_agents), fill_value=0)
 
         try:
             shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (16) * self.total_agents)
@@ -45,13 +47,18 @@ class Coordinator():
         self.config = self.get_environment_config()
         self.processes_started_successfully = mp.Value('i', 0)
         
-        self.a3c_agent = A3CAgent(self.config, self.total_agents)
+        self.a3c_agent = A3CAgent(self.config, self.total_agents, in_scheduling_mode=self.in_scheduling_mode)
 
-        self.sched_proc = mp.Process(target=self.rcv_obs_send_act_func, name= 'scheduler_intf')
+        if (self.in_scheduling_mode):
+            self.sched_proc = mp.Process(target=self.rcv_obs_send_act_func, name= 'scheduler_intf')
+        else:
+            self.sched_proc = None
+        
         self.decod_proc = mp.Process(target=self.rcv_return_func, name='decoder_intf')
 
-        self.cond_observations = [mp.Condition() for _ in range(self.total_agents)]
-        self.cond_actions      = [mp.Condition() for _ in range(self.total_agents)]
+        if (self.in_scheduling_mode):
+            self.cond_observations = [mp.Condition() for _ in range(self.total_agents)]
+            self.cond_actions      = [mp.Condition() for _ in range(self.total_agents)]
         self.cond_rewards      = [mp.Condition() for _ in range(self.total_agents)]
 
     def kill_all(self):
@@ -79,7 +86,7 @@ class Coordinator():
             seed = i * 35
             num_episodes = 1100
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/tmp/real_enb_results.csv'
+            results_file = '/home/naposto/phd/nokia/data/csv_48/v_estimate/common_layers/w_act_stop_gradient/beta_700_high_snr.csv'
             load_pretrained_weights = False
             pretrained_weights_path = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'
 
@@ -93,7 +100,7 @@ class Coordinator():
 
         config = Config()
         config.seed = seed
-        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 5, input_dims = 2)
+        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 15, input_dims = 2, in_scheduling_mode=self.in_scheduling_mode)
         config.num_episodes_to_run = num_episodes
         config.save_results = True
         config.results_file_path = results_file
@@ -113,7 +120,7 @@ class Coordinator():
                 'learning_rate': 1e-4,
                 'linear_hidden_units': [5, 32, 64, 100],
                 'num_actor_outputs': 1,
-                'use_state_value_critic': False,
+                'use_state_value_critic': True,
                 'final_layer_activation': ['softmax'],
                 'batch_size': 64,
                 'local_update_period': 1, # in episodes
@@ -124,7 +131,7 @@ class Coordinator():
                     'linear_hidden_units': [512, 1024, 1024]
                 },
                 'State_Value_Critic': {
-                    'linear_hidden_units': [16, 4]
+                    'linear_hidden_units': [16, 32, 32]
                 },
                 'Action_Value_Critic': {
                     'linear_hidden_units': [16, 32, 32],
@@ -139,18 +146,21 @@ class Coordinator():
         return config    
 
     def start(self):
-        self.sched_proc.start()
+        if (self.in_scheduling_mode):
+            self.sched_proc.start()
         self.decod_proc.start()
         inputs = []
         for idx in range(self.total_agents):
             input = {
-                'cond_observation': self.cond_observations[idx],
-                'cond_action': self.cond_actions[idx],
-                'cond_reward': self.cond_rewards[idx],
+                'cond_reward': self.cond_rewards[idx]
             }
+            if (self.in_scheduling_mode):
+                input['cond_observation'] = self.cond_observations[idx]
+                input['cond_action']      = self.cond_actions[idx]
             inputs.append(input)
         self.a3c_agent.run_n_episodes(self.processes_started_successfully, inputs)
-        self.sched_proc.join()
+        if (self.in_scheduling_mode):
+            self.sched_proc.join()
         self.decod_proc.join()
 
     def get_action(self):
@@ -171,6 +181,7 @@ class Coordinator():
             try:
                 with open(REWARD_IN, mode='rb') as file_read:
                     is_file_open = True
+                    print('Opening receive reward socket...')
                     while (True):
                         content = file_read.read(16)
                         if (len(content) <= 0):

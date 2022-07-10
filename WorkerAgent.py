@@ -15,6 +15,7 @@ class Actor_Critic_Worker(mp.Process):
                 optimizer_lock: mp.Lock, write_to_results_queue_lock: mp.Lock,
                 results_queue: mp.Queue, gradient_updates_queue: mp.Queue,
                 episode_number: mp.Value,
+                in_scheduling_mode: str,
                 actor_memory_name = 'model_actor',
                 critic_memory_name = 'model_critic') -> None:
         super(Actor_Critic_Worker, self).__init__()
@@ -32,9 +33,9 @@ class Actor_Critic_Worker(mp.Process):
         self.optimizer_lock = optimizer_lock
         self.write_to_results_queue_lock = write_to_results_queue_lock
         self.results_queue = results_queue
-        self.results_queue = results_queue
         self.gradient_updates_queue = gradient_updates_queue
         self.episode_number = episode_number
+        self.in_scheduling_mode = in_scheduling_mode
         self.actor_memory_name = actor_memory_name
         self.critic_memory_name = critic_memory_name
 
@@ -109,6 +110,9 @@ class Actor_Critic_Worker(mp.Process):
             if (self.use_action_value_critic):
                 self.critic.set_weights(copy.deepcopy(self.weights_critic))
 
+    def compute_critic_mse(self, tf):
+        return tf.reduce_mean(self.advantage * self.advantage), None
+
     def compute_critic_loss_alt(self, tf):
         probs = []
         def negloglik(y_distr, y_true):
@@ -155,7 +159,7 @@ class Actor_Critic_Worker(mp.Process):
             rewards: tf.Tensor with shape (batch_size, 1)
             z:       tf.Tensor with shape (batch_size, n_actions, n_atoms)
         """
-        advantage = self.rewards - self.critic_mean
+        self.advantage = self.rewards - self.critic_mean
 
         tensor_batch_logp   = tf.squeeze(tf.convert_to_tensor(self.batch_logp), axis = 1)
         tensor_batch_p      = tf.math.exp(tensor_batch_logp)
@@ -166,7 +170,7 @@ class Actor_Critic_Worker(mp.Process):
         joint_action_logp = tf.convert_to_tensor(joint_action_logp)
         joint_action_logp = tf.expand_dims(joint_action_logp, axis = 1)
 
-        actor_loss_inside_term = joint_action_logp * advantage # [batch_size x 1]
+        actor_loss_inside_term = joint_action_logp * self.advantage # [batch_size x 1]
         
         entropy = -1 * tf.expand_dims(
             tf.reduce_sum(tf.math.xlogy(tensor_batch_p, tensor_batch_p), axis = 1),
@@ -188,23 +192,25 @@ class Actor_Critic_Worker(mp.Process):
     def compute_losses(self, tf):
         self.rewards = tf.expand_dims(tf.convert_to_tensor(self.batch_rewards, dtype = tf.float32), axis = 1) # (batch_size, 1)
         self.actions = tf.convert_to_tensor(self.batch_action)
-        self.critic_mean = tf.expand_dims(tf.convert_to_tensor([value[0] for value in self.batch_critic_prio_to_last_layer]), axis = 1)
-        self.critic_std  = tf.expand_dims(tf.convert_to_tensor([value[1]   for value in self.batch_critic_prio_to_last_layer]), axis = 1)
+        self.critic_mean = tf.convert_to_tensor(self.batch_critic_outputs)
+        # self.critic_std  = tf.expand_dims(tf.convert_to_tensor([value[1]   for value in self.batch_critic_prio_to_last_layer]), axis = 1)
 
         actor_loss, actor_info  = self.compute_actor_loss(tf)
         critic_loss = None
-        if (self.use_action_value_critic):
-            critic_loss, critic_info = self.compute_critic_loss_alt(tf)
-            critic_probs = critic_info['probs']
+        critic_loss, critic_info = self.compute_critic_mse(tf)
+        critic_probs = ''
         
         ret_info = {
             'tensor_batch_p': actor_info['tensor_batch_p'],
             'entropy'       : actor_info['entropy'],
             'actor_loss'    : actor_loss.numpy(),
             'critic_loss'   : critic_loss.numpy(),
-            'critic_probs'  : critic_probs.numpy()
+            'critic_probs'  : ''
         }
-        return actor_loss, critic_loss, ret_info
+        if (not self.use_action_value_critic):
+            return actor_loss + critic_loss, critic_loss, ret_info
+        else:
+            return actor_loss, critic_loss, ret_info
 
     def send_gradients(self, tape, actor_loss, critic_loss):
         gradients = [tape.gradient(actor_loss, self.actor.trainable_weights)]
@@ -214,22 +220,53 @@ class Actor_Critic_Worker(mp.Process):
         return gradients
 
     def send_results(self, tf, info):
-        tensor_batch_p = info['tensor_batch_p']
-        entropy        = info['entropy']
-        actor_loss     = info['actor_loss']
-        critic_loss    = info['critic_loss']
-        probs_batched = [tf.reduce_mean(tensor_batch_p, axis = 0)]
-                
-        rew_mean = np.mean(self.batch_rewards)
-        mcs_mean, prb_mean = self.environment.calculate_mean(probs_batched)
+        if (self.in_scheduling_mode):            
+            tensor_batch_p = info['tensor_batch_p']
+            entropy        = info['entropy']
+            actor_loss     = info['actor_loss']
+            critic_loss    = info['critic_loss']
+            critic_probs   = info['critic_probs']
+            probs_batched = [tf.reduce_mean(tensor_batch_p, axis = 0)]
+                    
+            rew_mean = np.mean(self.batch_rewards)
+            mcs_mean, prb_mean = self.environment.calculate_mean(probs_batched)
+        else:
+            rew_mean = '-1'
+            entropy = '-1'
+            mcs_mean = '-1'
+            prb_mean = '-1'
+            actor_loss = '-1'
+            critic_loss = '-1'
+            critic_probs = '-1'
+            probs_batched = None
         additional_columns = self.environment.get_csv_result_policy_output(probs_batched, self.batch_info)
 
         with self.write_to_results_queue_lock:
             self.episode_number.value += 1
-            self.results_queue.put([ [self.worker_num, rew_mean, entropy, mcs_mean, prb_mean, actor_loss, critic_loss], additional_columns ])
+            self.results_queue.put([ [self.worker_num, rew_mean, entropy, mcs_mean, prb_mean, actor_loss, critic_loss, critic_probs], additional_columns ])
+
+
+    def run_in_collecting_stats_mode(self):
+        self.environment.setup(self.worker_num, self.total_workers)
+        with self.successfully_started_worker.get_lock():
+            self.successfully_started_worker.value += 1
+        
+        for self.ep_ix in range(self.episodes_to_run):
+            self.batch_info = []
+            if (self.ep_ix % 1 == 0):
+                print(str(self) + ' -> Episode {}/{}'.format(self.ep_ix + 1, self.episodes_to_run))
+            for _ in range(self.batch_size):
+                next_state, reward, done, info = self.environment.step(None)
+                self.batch_info.append(info)
+            self.send_results(None, self.batch_info)
+
+
 
 
     def run(self) -> None:
+        if (not self.in_scheduling_mode):
+            self.run_in_collecting_stats_mode()
+            return
         tf, _, self.tfp = import_tensorflow('3', True)
         self.set_process_seeds(tf, self.worker_num)        
         self.initiate_worker_variables(tf)        
@@ -286,16 +323,25 @@ class Actor_Critic_Worker(mp.Process):
         tensor_state = tf.convert_to_tensor([state], dtype = tf.float32)
         
         model_output = self.actor(tensor_state)
-        actor_output_probs = model_output
 
-        actor_output_log_probs = tf.math.log(actor_output_probs + 1e-10)
-        actor_sample = tf.random.categorical(actor_output_log_probs, num_samples = 1) 
-        action = [actor_sample[0][0].numpy()]
-        if (self.use_action_value_critic):
+        if (not self.use_action_value_critic):
+            actor_output_probs = model_output[0]
+            actor_output_log_probs = tf.math.log(actor_output_probs + 1e-10)
+            actor_sample = tf.random.categorical(actor_output_log_probs, num_samples = 1) 
+            action = [actor_sample[0][0].numpy()]
+            critic_output = model_output[1]
+            info = []
+        elif (self.use_action_value_critic):
+            actor_output_probs = model_output
+            actor_output_log_probs = tf.math.log(actor_output_probs + 1e-10)
+            actor_sample = tf.random.categorical(actor_output_log_probs, num_samples = 1) 
+            action = [actor_sample[0][0].numpy()]
+            
             tensor_state = tf.convert_to_tensor([state])
             critic_output_distr = self.critic(tensor_state) # distribution
             critic_output = critic_output_distr[0]
-            info = [critic_output_distr[1][0][0].numpy(), critic_output_distr[1][0][1].numpy()]
+            info = []
+
         return action, actor_output_log_probs, critic_output, info
 
 

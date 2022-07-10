@@ -1,3 +1,4 @@
+from ast import Lambda
 import logging
 import os
 import gym
@@ -60,7 +61,9 @@ class BaseAgent(object):
             actor_output = None
             for neurons in actor_linear_hidden_units:
                 if actor_output is None:
-                    inp = common
+                    import keras.backend as K
+                    stop_gradient_layer = layers.Lambda(lambda x: K.stop_gradient(x))(common)
+                    inp = stop_gradient_layer
                 else:
                     inp = actor_output
                 actor_output = layers.Dense(neurons, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(inp)
@@ -119,14 +122,16 @@ class BaseAgent(object):
                 common = layers.Dense(neurons, activation='relu', kernel_initializer = tf.keras.initializers.HeNormal())(inp)
             if (common is None):
                 common = inputs
-            common = layers.Dense(
-                                1 + 1, kernel_initializer=tf.keras.initializers.GlorotNormal())(common)
+            # action_value_critic_output = layers.Dense(
+            #                     1 + 1, kernel_initializer=tf.keras.initializers.GlorotNormal())(common)
             
-            tfd = tfp.distributions
-            action_value_critic_output = tfp.layers.DistributionLambda(lambda t: tfd.Normal(
-                                                loc = t[..., :1], 
-                                                scale=1e-3 + tf.math.softplus(0.05 * t[...,1:]))) (common)
-            action_value_critic = tf.keras.Model(inputs, [action_value_critic_output, common], name = 'action_value_critic')
+            # tfd = tfp.distributions
+            # action_value_critic_output = tfp.layers.DistributionLambda(lambda t: tfd.Normal(
+            #                                     loc = t[..., :1], 
+            #                                     scale=1e-3 + tf.math.softplus(0.05 * t[...,1:]))) (common)
+            action_value_critic_output = layers.Dense(
+                                1, kernel_initializer=tf.keras.initializers.GlorotNormal())(common)
+            action_value_critic = tf.keras.Model(inputs, [action_value_critic_output], name = 'action_value_critic')
             models.append(action_value_critic)
 
         return models

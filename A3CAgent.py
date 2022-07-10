@@ -25,13 +25,14 @@ COLUMNS = [
 ]
 
 class A3CAgent(BaseAgent):
-    def __init__(self, config, num_processes) -> None:
+    def __init__(self, config, num_processes, in_scheduling_mode) -> None:
         super(A3CAgent, self).__init__(config)  
         self.num_processes = num_processes
         self.worker_processes = []
         self.optimizer_worker = None
         self.actor_memory_name = 'model_actor'
         self.critic_memory_name = 'model_critic'
+        self.in_scheduling_mode = in_scheduling_mode
 
     def kill_all(self):
         self.exit_gracefully()
@@ -43,26 +44,56 @@ class A3CAgent(BaseAgent):
             shm = shared_memory.SharedMemory(name = memory_name, create = False, size = memory_size)
         return shm
 
+    def run_in_collect_stats_mode(self, processes_started_successfully = None, inputs = None):
+        successfully_started_worker = mp.Value('i', 0)
+        for worker_num in range(self.num_processes):
+            import copy
+            worker_environment = copy.deepcopy(self.environment)
+            if (inputs is not None):
+                worker_environment.presetup(inputs[worker_num])
+            worker = Actor_Critic_Worker(
+                worker_environment, self.config, 
+                worker_num, self.num_processes,
+                self.episodes_per_process, None, None,
+                successfully_started_worker,
+                None, self.write_to_results_queue_lock,
+                self.results_queue, None,
+                self.episode_number, 
+                in_scheduling_mode=False)
+            worker.start()
+            self.worker_processes.append(worker)
+        while (successfully_started_worker.value < self.num_processes):
+            pass
+        if (processes_started_successfully is not None):
+                processes_started_successfully.value = 1
+        if (self.config.save_results):
+            self.save_results(self.config.results_file_path, self.episode_number, self.results_queue)
+        for worker in self.worker_processes:
+            worker.join()
+
     def run_n_episodes(self, processes_started_successfully = None, inputs = None):
-        results_queue                     = mp.Queue()
+        if (self.config.num_episodes_to_run > 0):
+            self.episodes_per_process = int(self.config.num_episodes_to_run / self.num_processes)
+        else:
+            self.episodes_per_process = -1 # run indefinitely
+        self.episode_number                    = mp.Value('i', 0)        
+        self.results_queue                     = mp.Queue()
+        self.write_to_results_queue_lock  = mp.Lock()        
+        
+        if (not self.in_scheduling_mode):
+            self.run_in_collect_stats_mode(processes_started_successfully, inputs)
+            return
+        
         gradient_updates_queue            = mp.Queue()
         optimizer_lock                    = mp.Lock()
-        self.write_to_results_queue_lock  = mp.Lock()        
-        episode_number                    = mp.Value('i', 0)        
         actor_memory_size_in_bytes        = mp.Value('i', 0)
         critic_memory_size_in_bytes       = mp.Value('i', 0)
         memory_created                    = mp.Value('i', 0)
         master_agent_initialized          = mp.Value('i', 0)
         master_agent_stop                 = mp.Value('i', 0)
         successfully_started_worker       = mp.Value('i', 0)
-        
 
-        if (self.config.num_episodes_to_run > 0):
-            episodes_per_process = int(self.config.num_episodes_to_run / self.num_processes)
-        else:
-            episodes_per_process = -1 # run indefinitely
-
-
+        self.use_action_value_critic = not self.config.hyperparameters['Actor_Critic_Common']['use_state_value_critic']
         self.optimizer_worker = Master_Agent(
                 self.hyperparameters,
                 self.config, self.state_size, self.action_size,
@@ -77,12 +108,15 @@ class A3CAgent(BaseAgent):
         self.optimizer_worker.start()
         while (actor_memory_size_in_bytes.value == 0):
             pass
-        while (critic_memory_size_in_bytes.value == 0):
+
+        while (self.use_action_value_critic and critic_memory_size_in_bytes.value == 0):
             pass
 
         try:
             self.shm_actor  = self.create_shared_memory(self.actor_memory_name ,  actor_memory_size_in_bytes.value)
-            self.shm_critic = self.create_shared_memory(self.critic_memory_name, critic_memory_size_in_bytes.value)
+
+            if (self.use_action_value_critic):
+                self.shm_critic = self.create_shared_memory(self.critic_memory_name, critic_memory_size_in_bytes.value)
             memory_created.value = 1
                         
             while (master_agent_initialized.value == 0):
@@ -98,11 +132,11 @@ class A3CAgent(BaseAgent):
                 worker = Actor_Critic_Worker(
                     worker_environment, self.config, 
                     worker_num, self.num_processes,
-                    episodes_per_process, self.state_size, self.action_size,
+                    self.episodes_per_process, self.state_size, self.action_size,
                     successfully_started_worker,
                     optimizer_lock, self.write_to_results_queue_lock,
-                    results_queue, gradient_updates_queue,
-                    episode_number)
+                    self.results_queue, gradient_updates_queue,
+                    self.episode_number, in_scheduling_mode=True)
                 worker.start()
                 self.worker_processes.append(worker)
             while (successfully_started_worker.value < self.num_processes):
@@ -111,7 +145,7 @@ class A3CAgent(BaseAgent):
             if (processes_started_successfully is not None):
                 processes_started_successfully.value = 1
             if (self.config.save_results):
-                self.save_results(save_file, episode_number, results_queue)
+                self.save_results(save_file, self.episode_number, self.results_queue)
             for worker in self.worker_processes:
                 worker.join()
             master_agent_stop.value = 1

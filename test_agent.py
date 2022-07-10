@@ -41,7 +41,7 @@ config.hyperparameters = {
         'learning_rate': 1e-4,
         'linear_hidden_units': [5, 32, 64, 100],
         'num_actor_outputs': 1,
-        'use_state_value_critic': False,
+        'use_state_value_critic': True,
         'final_layer_activation': ['softmax'],
         'batch_size': 64,
         'include_entropy_term': True,
@@ -52,7 +52,7 @@ config.hyperparameters = {
             'linear_hidden_units': [512, 1024, 1024]
         },
         'State_Value_Critic': {
-            'linear_hidden_units': [16, 4]
+            'linear_hidden_units': [16, 32, 32]
         },
         'Action_Value_Critic': {
             'linear_hidden_units': [16, 32, 32],
@@ -91,5 +91,5 @@ for beta_range, beta in zip([beta_low], ['all']):
             config.results_file_path = '/tmp/dt_twin.csv'
             config.save_weights = False
             # config.save_weights_file = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'.format(run_idx)
-            A3C_Agent = A3CAgent(config, 8)
+            A3C_Agent = A3CAgent(config, 1)
             A3C_Agent.run_n_episodes()

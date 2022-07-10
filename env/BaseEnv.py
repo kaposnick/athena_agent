@@ -36,13 +36,15 @@ class BaseEnv(gym.Env):
                 policy_output_format: str,
                 title: str, 
                 verbose: Number,
-                decode_deadline = 3000) -> None:
+                decode_deadline = 3000, 
+                in_scheduling_mode = True) -> None:
         super(BaseEnv, self).__init__()
         self.min_penalty = penalty
         self.policy_output_format = policy_output_format
         self.title = title
         self.verbose = verbose
         self.decode_deadline = decode_deadline
+        self.in_scheduling_mode = in_scheduling_mode
         self.input_dims = input_dims
         self.observation_shape = (input_dims, )
         self.observation_space = spaces.Box(
@@ -127,8 +129,11 @@ class BaseEnv(gym.Env):
 
     def get_csv_result_policy_output(self, probs, infos) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):
-            action_probs = probs[0]
-            mcs_prb = str(action_probs.numpy()).replace('\n','')
+            if (self.in_scheduling_mode):
+                action_probs = probs[0]
+                mcs_prb = str(action_probs.numpy()).replace('\n','')
+            else:
+                mcs_prb = ''
 
             num_crc_ok = 0
             num_dec_time_ok = 0
