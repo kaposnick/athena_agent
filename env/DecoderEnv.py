@@ -27,7 +27,8 @@ class DecoderEnv(BaseEnv):
             penalty = penalty,
             policy_output_format = policy_output_format,
             title = title, 
-            verbose = verbose)
+            verbose = verbose, 
+            in_scheduling_mode=True)
         self.decoder_model_path = decoder_model_path
         self.tbs_table_path = tbs_table_path
 

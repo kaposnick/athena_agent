@@ -21,11 +21,11 @@ COL_DT_SIM = 'sim'
 
 COLUMNS = [
     COL_DT_REP, COL_DT_SIM,
-    COL_DT_REWARD_MEAN, COL_DT_ENTROPY_MEAN, COL_DT_MCS_MEAN, COL_DT_PRB_MEAN, COL_DT_AC_LOSS_MEAN, COL_DT_CR_LOSS_MEAN, 'critic_probs'
+    COL_DT_REWARD_MEAN, COL_DT_MCS_MEAN, COL_DT_PRB_MEAN, COL_DT_AC_LOSS_MEAN, COL_DT_CR_LOSS_MEAN
 ]
 
 class A3CAgent(BaseAgent):
-    def __init__(self, config, num_processes, in_scheduling_mode) -> None:
+    def __init__(self, config, num_processes, in_scheduling_mode = True) -> None:
         super(A3CAgent, self).__init__(config)  
         self.num_processes = num_processes
         self.worker_processes = []

@@ -1,7 +1,7 @@
 import multiprocessing as mp
 from BaseAgent import BaseAgent
 
-from common_utils import get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
+from common_utils import get_basic_actor_network, get_basic_critic_network, get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
 import random
 import numpy as np
 
@@ -57,10 +57,10 @@ class Master_Agent(mp.Process):
     def initiate_models(self, tf):
         try:
             stage = 'Creating the neural networks'
-            models = BaseAgent.create_NN(tf, 
-                                self.state_size, 
-                                [*self.action_size, 1], 
-                                self.config.hyperparameters, tfp = self.tfp)
+            models = [
+                get_basic_actor_network(tf, self.state_size), 
+                get_basic_critic_network(tf, self.state_size, 1, self.action_size)
+            ]
 
             self.actor = models[0]
             self.actor_memory_bytes.value, actor_dtype = self.compute_model_size(self.actor)

@@ -116,6 +116,23 @@ class BaseEnv(gym.Env):
     def get_observation(self):
         return self.observation
 
+    def get_k_closest_actions(self, k, target_tbs):
+        distances_info = []
+        for action_idx in range(len(self.action_array)):
+            action = self.action_array[action_idx]
+            mcs = int(action[0])
+            prb = int(action[1])
+            tbs = self.to_tbs(mcs, prb)
+            distance = np.abs(tbs - target_tbs)
+            distances_info.append({
+                'action_idx': action_idx,
+                'mcs': mcs,
+                'prb': prb,
+                'distance': distance
+            })
+        sorted_distances = [ x['action_idx'] for x in sorted(distances_info, key = lambda el: (el['distance'])) ]
+        return sorted_distances[:k]
+
     def get_csv_result_policy_output_columns(self) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):
             columns = ['crc_ok', 
@@ -127,14 +144,8 @@ class BaseEnv(gym.Env):
             return columns
         else: raise Exception("Can't handle policy output format")
 
-    def get_csv_result_policy_output(self, probs, infos) -> list:
+    def get_csv_result_policy_output(self, infos) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):
-            if (self.in_scheduling_mode):
-                action_probs = probs[0]
-                mcs_prb = str(action_probs.numpy()).replace('\n','')
-            else:
-                mcs_prb = ''
-
             num_crc_ok = 0
             num_dec_time_ok = 0
             dec_times_ok = []
@@ -177,14 +188,7 @@ class BaseEnv(gym.Env):
                      { 'period': 1, 'value': np.round(throughput_ok_mean, 3)},
                      { 'period': 1, 'value': np.round(throughput_ok_std , 3)},
                      { 'period': 1, 'value': np.round(throughput_ko_mean, 3)},
-                     { 'period': 1, 'value': np.round(throughput_ko_std , 3)},
-                     { 'period': 50, 'value': mcs_prb }  ]
-        elif (self.policy_output_format == "mcs_prb_independent"):
-            mcs_probs = probs[0]
-            mcs_result = [action_prob.numpy() for action_prob in mcs_probs]
-            prb_probs = probs[1]
-            prb_result = [action_prob.numpy() for action_prob in prb_probs]
-            return mcs_result + prb_result
+                     { 'period': 1, 'value': np.round(throughput_ko_std , 3)}]
         else: raise Exception("Can't handle policy output format")
 
 
@@ -220,13 +224,25 @@ class BaseEnv(gym.Env):
         mcs, prb = self.action_array[action_idx]
         return int(mcs), int(prb)
 
-    def fn_mcs_prb_joint_mean_calculation(self, probs):
+    def fn_mcs_prb_joint_mean_calculation(self, probs, info):
         mcs_mean = 0
         prb_mean = 0
-        for prob, action in zip(probs[0], self.action_array):
-            mcs_mean += prob * action[0]
-            prb_mean += prob * action[1]
-        return mcs_mean.numpy(), prb_mean.numpy()
+        if (probs is not None):
+            for prob, action in zip(probs[0], self.action_array):
+                mcs_mean += prob * action[0]
+                prb_mean += prob * action[1]
+            mcs_mean = mcs_mean.numpy()
+            prb_mean = prb_mean.numpy()
+        else:
+            if (len(info) > 0):
+                mcs = 0
+                prb = 0
+                for __key_info in info:
+                    mcs += __key_info['mcs']
+                    prb += __key_info['prb']
+                mcs_mean = mcs / len(info)
+                prb_mean = prb / len(info)
+        return mcs_mean, prb_mean
 
     def fn_mcs_prb_indpendent_action_translation(self, action) -> tuple:
         # in this case action is [mcs_action_idx, prb_action_idx]
@@ -236,7 +252,7 @@ class BaseEnv(gym.Env):
         assert action_prb >= 0 and action_prb < len(PRB_SPACE), 'Action PRB {} not in range'.format(action_prb)
         return int(MCS_SPACE[action_mcs]), int(PRB_SPACE[action_prb])
 
-    def fn_mcs_prb_independent_mean_calculation(self, probs) -> tuple:
+    def fn_mcs_prb_independent_mean_calculation(self, probs, info) -> tuple:
         mcs_probs = probs[0]
         prb_probs = probs[1]
         mcs_mean = mcs_probs * MCS_SPACE
@@ -248,8 +264,8 @@ class BaseEnv(gym.Env):
     def translate_action(self, action) -> tuple:
         return self.fn_action_translation(action)
 
-    def calculate_mean(self, probs) -> tuple:
-        return self.fn_calculate_mean(probs)
+    def calculate_mean(self, probs, info) -> tuple:
+        return self.fn_calculate_mean(probs, info)
 
     def __str__(self) -> str:
         return self.title

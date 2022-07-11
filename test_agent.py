@@ -29,7 +29,7 @@ decoder_env = DecoderEnv(
 config = Config()
 config.seed = 1
 config.environment = decoder_env
-config.num_episodes_to_run = 1000
+config.num_episodes_to_run = 2000
 config.randomise_random_seed = False
 config.runs_per_agent = 1
 config.save_results = True
@@ -39,35 +39,16 @@ config.save_weights_period = 100
 config.hyperparameters = {
     'Actor_Critic_Common': {
         'learning_rate': 1e-4,
-        'linear_hidden_units': [5, 32, 64, 100],
-        'num_actor_outputs': 1,
-        'use_state_value_critic': True,
-        'final_layer_activation': ['softmax'],
+        'use_state_value_critic': False,
         'batch_size': 64,
-        'include_entropy_term': True,
-        'local_update_period': 1, # in episodes
-        'entropy_beta': 0.1,
-        'entropy_contrib_prob': 1,
-        'Actor': {
-            'linear_hidden_units': [512, 1024, 1024]
-        },
-        'State_Value_Critic': {
-            'linear_hidden_units': [16, 32, 32]
-        },
-        'Action_Value_Critic': {
-            'linear_hidden_units': [16, 32, 32],
-            'final_layer_activation': 'softmax',
-            'vmin': -5, 
-            'vmax': 3.5,
-            'n_atoms': 8
-        }
+        'local_update_period': 1
     },
         
 }
 
 import copy
 for beta_range, beta in zip([beta_low], ['all']):
-    for noise_range, noise in zip([noise_low], ['all']):
+    for noise_range, noise in zip([noise_high], ['all']):
         decoder_env = DecoderEnv(
             decoder_model_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/crc_ce_dcd_time_prob.h5',
             input_norm_mean_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/scaler_mean.npy',
@@ -79,7 +60,7 @@ for beta_range, beta in zip([beta_low], ['all']):
             version='probabilistic',
             sample_strategy = 'percentile_99',
             input_dims=2,
-            penalty=4.99
+            penalty=5
         )
         for run_idx in range(config.runs_per_agent):
             seed = run_idx * 32 + 1
@@ -91,5 +72,5 @@ for beta_range, beta in zip([beta_low], ['all']):
             config.results_file_path = '/tmp/dt_twin.csv'
             config.save_weights = False
             # config.save_weights_file = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'.format(run_idx)
-            A3C_Agent = A3CAgent(config, 1)
+            A3C_Agent = A3CAgent(config, 8)
             A3C_Agent.run_n_episodes()

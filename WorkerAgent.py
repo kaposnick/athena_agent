@@ -1,9 +1,10 @@
 import multiprocessing as mp
 import numpy as np
 import random
+from OUActionNoise import OUActionNoise
+from Buffer import Buffer
 from env.BaseEnv import BaseEnv
-from common_utils import import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer
-from BaseAgent import BaseAgent
+from common_utils import get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer
 from Config import Config
 
 class Actor_Critic_Worker(mp.Process):
@@ -47,17 +48,7 @@ class Actor_Critic_Worker(mp.Process):
     def init_configuration(self):
         self.local_update_period = self.config.hyperparameters['Actor_Critic_Common']['local_update_period']
         self.batch_size = self.config.hyperparameters['Actor_Critic_Common']['batch_size']
-        self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
         self.use_action_value_critic = not self.config.hyperparameters['Actor_Critic_Common']['use_state_value_critic']
-        if (self.use_action_value_critic):
-            self.vmin    = self.config.hyperparameters['Actor_Critic_Common']['Action_Value_Critic']['vmin']
-            self.vmax    = self.config.hyperparameters['Actor_Critic_Common']['Action_Value_Critic']['vmax']
-            self.n_atoms = self.config.hyperparameters['Actor_Critic_Common']['Action_Value_Critic']['n_atoms']
-            self.delta = (self.vmax - self.vmin) / self.n_atoms
-            
-        if (self.include_entropy_term):            
-            self.entropy_beta = self.config.hyperparameters['Actor_Critic_Common']['entropy_beta']
-            self.entropy_contrib_prob = self.config.hyperparameters['Actor_Critic_Common']['entropy_contrib_prob']
 
     
 
@@ -79,10 +70,11 @@ class Actor_Critic_Worker(mp.Process):
     def initiate_models(self, tf):
         try:
             stage = 'Creating the neural networks'
-            models = BaseAgent.create_NN(tf, 
-                                self.state_size, 
-                                [*self.action_size, 1], 
-                                self.config.hyperparameters, tfp = self.tfp)
+            
+            models = [
+                get_basic_actor_network(tf, self.state_size), 
+                get_basic_critic_network(tf, self.state_size, 1, self.action_size)
+            ]
 
             stage = 'Actor memory reference creation'
             self.actor = models[0]
@@ -99,9 +91,10 @@ class Actor_Critic_Worker(mp.Process):
             raise e
 
     def initiate_worker_variables(self, tf):
-        self.batch_range = tf.expand_dims(tf.range(0, self.batch_size), axis = 1)
-        if (self.use_action_value_critic):
-            self.atoms_range = tf.expand_dims(tf.range(start = self.vmin, limit = self.vmax, delta = self.delta, dtype = tf.float32), axis = 1)
+        std_dev = 0.2
+        self.ou_noise = OUActionNoise(mean=np.zeros(1), std_deviation=float(std_dev) * np.ones(1))
+        self.k = 10
+        self.buffer = Buffer(self.batch_size, self.batch_size, self.state_size, 1)
 
     def update_weights(self):
         import copy
@@ -123,94 +116,27 @@ class Actor_Critic_Worker(mp.Process):
         critic_loss = tf.reduce_mean([negloglik(y_distr, y_true) for y_distr, y_true in zip(self.batch_critic_outputs, self.rewards)])
         return critic_loss, {'probs': tf.convert_to_tensor(np.mean(probs))}
 
-    def compute_critic_loss(self, tf, rewards, z, actions):
-        atoms = rewards
-        b = tf.clip_by_value(
-            (atoms - self.vmin) / self.delta, 
-            clip_value_min = self.vmin, clip_value_max = self.vmax)
-        l = tf.clip_by_value(tf.math.floor(b),
-                            clip_value_min = 0,
-                            clip_value_max = (self.n_atoms - 1))
-        u = tf.clip_by_value(tf.math.ceil(b), 
-                            clip_value_min = 0,
-                            clip_value_max = (self.n_atoms - 1))
-        probabilities = tf.ones((self.batch_size, self.n_atoms)) / self.n_atoms
-        lower = probabilities * (u - b)
-        upper = probabilities * (b - l)
-        z_projected = tf.zeros_like(probabilities)
-
-        l_cast = tf.cast(l, dtype = tf.int32)
-        u_cast = tf.cast(u, dtype = tf.int32)
-        z_projected = tf.tensor_scatter_nd_add(tensor  = z_projected, 
-                                            indices = tf.concat([self.batch_range, l_cast], axis = 1), 
-                                            updates = tf.squeeze(tf.gather(lower, l_cast, batch_dims = 1)))
-        
-
-        z_projected = tf.tensor_scatter_nd_add(tensor = z_projected, 
-                                            indices = tf.concat([self.batch_range, u_cast], axis = 1), 
-                                            updates = tf.squeeze(tf.gather(upper, u_cast, batch_dims = 1)))
-        z_stacked = tf.stack([sample_z[sample_action[0]] for sample_z, sample_action in zip(z, actions)])
-        critic_loss = -1 * tf.reduce_mean(tf.reduce_sum((z_projected * tf.math.log(z_stacked)), axis = -1))
-        return critic_loss
-        
+    def compute_critic_loss(self, tf):
+        critic_loss = tf.math.reduce_mean(tf.math.square(self.rewards, self.critic_mean))
+        return critic_loss, None        
 
     def compute_actor_loss(self, tf):
-        """
-            rewards: tf.Tensor with shape (batch_size, 1)
-            z:       tf.Tensor with shape (batch_size, n_actions, n_atoms)
-        """
-        self.advantage = self.rewards - self.critic_mean
-
-        tensor_batch_logp   = tf.squeeze(tf.convert_to_tensor(self.batch_logp), axis = 1)
-        tensor_batch_p      = tf.math.exp(tensor_batch_logp)
-
-        joint_action_logp = []
-        for batch_idx in range(self.batch_size):
-            joint_action_logp.append(tensor_batch_logp[batch_idx][self.actions[batch_idx][0].numpy()])
-        joint_action_logp = tf.convert_to_tensor(joint_action_logp)
-        joint_action_logp = tf.expand_dims(joint_action_logp, axis = 1)
-
-        actor_loss_inside_term = joint_action_logp * self.advantage # [batch_size x 1]
-        
-        entropy = -1 * tf.expand_dims(
-            tf.reduce_sum(tf.math.xlogy(tensor_batch_p, tensor_batch_p), axis = 1),
-            axis = 1
-        )                        
-        if (self.include_entropy_term):
-            entropy_contribution = np.random.binomial(1, np.power(self.entropy_contrib_prob, self.ep_ix))
-            actor_loss_inside_term += entropy_contribution * self.entropy_beta * entropy
-        actor_loss = -1 * tf.reduce_mean(actor_loss_inside_term)
-        info_entropy = np.mean(entropy)
-
-        info = {
-            'tensor_batch_p': tensor_batch_p, 
-            'entropy':        info_entropy
-        }
-        
-        return actor_loss, info
+        actor_loss = -1 * tf.math.reduce_mean(self.critic_mean)        
+        return actor_loss, None
 
     def compute_losses(self, tf):
         self.rewards = tf.expand_dims(tf.convert_to_tensor(self.batch_rewards, dtype = tf.float32), axis = 1) # (batch_size, 1)
         self.actions = tf.convert_to_tensor(self.batch_action)
         self.critic_mean = tf.convert_to_tensor(self.batch_critic_outputs)
-        # self.critic_std  = tf.expand_dims(tf.convert_to_tensor([value[1]   for value in self.batch_critic_prio_to_last_layer]), axis = 1)
 
         actor_loss, actor_info  = self.compute_actor_loss(tf)
-        critic_loss = None
-        critic_loss, critic_info = self.compute_critic_mse(tf)
-        critic_probs = ''
+        critic_loss, critic_info = self.compute_critic_loss(tf)
         
         ret_info = {
-            'tensor_batch_p': actor_info['tensor_batch_p'],
-            'entropy'       : actor_info['entropy'],
             'actor_loss'    : actor_loss.numpy(),
-            'critic_loss'   : critic_loss.numpy(),
-            'critic_probs'  : ''
+            'critic_loss'   : critic_loss.numpy()
         }
-        if (not self.use_action_value_critic):
-            return actor_loss + critic_loss, critic_loss, ret_info
-        else:
-            return actor_loss, critic_loss, ret_info
+        return actor_loss, critic_loss, ret_info
 
     def send_gradients(self, tape, actor_loss, critic_loss):
         gradients = [tape.gradient(actor_loss, self.actor.trainable_weights)]
@@ -220,30 +146,22 @@ class Actor_Critic_Worker(mp.Process):
         return gradients
 
     def send_results(self, tf, info):
-        if (self.in_scheduling_mode):            
-            tensor_batch_p = info['tensor_batch_p']
-            entropy        = info['entropy']
+        if (self.in_scheduling_mode):
             actor_loss     = info['actor_loss']
             critic_loss    = info['critic_loss']
-            critic_probs   = info['critic_probs']
-            probs_batched = [tf.reduce_mean(tensor_batch_p, axis = 0)]
-                    
-            rew_mean = np.mean(self.batch_rewards)
-            mcs_mean, prb_mean = self.environment.calculate_mean(probs_batched)
+            rew_mean       = info['reward']
+            mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
         else:
             rew_mean = '-1'
-            entropy = '-1'
             mcs_mean = '-1'
             prb_mean = '-1'
             actor_loss = '-1'
             critic_loss = '-1'
-            critic_probs = '-1'
-            probs_batched = None
-        additional_columns = self.environment.get_csv_result_policy_output(probs_batched, self.batch_info)
+        additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
 
         with self.write_to_results_queue_lock:
             self.episode_number.value += 1
-            self.results_queue.put([ [self.worker_num, rew_mean, entropy, mcs_mean, prb_mean, actor_loss, critic_loss, critic_probs], additional_columns ])
+            self.results_queue.put([ [self.worker_num, rew_mean, mcs_mean, prb_mean, actor_loss, critic_loss], additional_columns ])
 
 
     def run_in_collecting_stats_mode(self):
@@ -261,6 +179,27 @@ class Actor_Critic_Worker(mp.Process):
             self.send_results(None, self.batch_info)
 
 
+    def learn(self, tf):
+        state_batch, action_batch, reward_batch = self.buffer.sample(tf)
+        with tf.GradientTape() as tape1:
+            critic_value = self.critic([state_batch, action_batch], training = True)
+            critic_loss = tf.math.reduce_mean(tf.math.square(reward_batch - critic_value))
+        critic_grads = tape1.gradient(critic_loss, self.critic.trainable_weights)
+
+        with tf.GradientTape() as tape2:
+            new_action_batch = self.actor(state_batch)
+            actor_loss = -1 * self.critic([state_batch, new_action_batch])
+            actor_loss = tf.math.reduce_mean(actor_loss)
+        actor_grads = tape2.gradient(actor_loss, self.actor.trainable_weights)
+
+        gradients = [actor_grads, critic_grads]
+        self.gradient_updates_queue.put(gradients)
+        info = {
+            'actor_loss' : actor_loss.numpy(),
+            'critic_loss': critic_loss.numpy(),
+            'reward'     : tf.math.reduce_mean(reward_batch).numpy()
+        }
+        return info
 
 
     def run(self) -> None:
@@ -268,6 +207,7 @@ class Actor_Critic_Worker(mp.Process):
             self.run_in_collecting_stats_mode()
             return
         tf, _, self.tfp = import_tensorflow('3', True)
+        self.tf = tf
         self.set_process_seeds(tf, self.worker_num)        
         self.initiate_worker_variables(tf)        
         try:
@@ -283,37 +223,22 @@ class Actor_Critic_Worker(mp.Process):
                 if (self.ep_ix % self.local_update_period == 0):
                     self.update_weights()
 
-                self.batch_action = []
-                self.batch_logp = []
-                self.batch_rewards = []
-                self.batch_critic_outputs = []
-                self.batch_critic_prio_to_last_layer = []
                 self.batch_info = []
 
+                batch_idx = 0
+                while batch_idx < self.batch_size:
+                    state = self.environment.reset()
+                    done = False
+                    while not done:
+                        action = self.pick_action_from_embedding_table(state, tf)
+                        next_state, reward, done, info = self.environment.step([action])
 
-                with tf.GradientTape(persistent=True) as tape:
-                    batch_idx = 0
-                    while batch_idx < self.batch_size:
-                        state = self.environment.reset()
-                        done = False
-                        while not done:
-                            action, logp, critic_output, critic_prio_to_last_layer = self.pick_action_and_get_critic_values(state, tf)
-                            next_state, reward, done, info = self.environment.step(action)
-                            
-                            self.batch_action.append(action)
-                            self.batch_logp.append(logp)
-                            self.batch_rewards.append(reward)
-                            self.batch_critic_outputs.append(critic_output)
-                            self.batch_critic_prio_to_last_layer.append(critic_prio_to_last_layer)
-                            self.batch_info.append(info)
-                            state = next_state
-                            batch_idx += 1
-                    
-                    actor_loss, critic_loss, info = self.compute_losses(tf)
-                    
-                self.send_gradients(tape, actor_loss, critic_loss)
-                del tape
-                
+                        self.buffer.record((state, action, reward))
+                        self.batch_info.append(info)
+                        state = next_state
+                        batch_idx += 1
+
+                info = self.learn(tf)                
                 self.send_results(tf, info)                
                 
         finally:
@@ -343,5 +268,22 @@ class Actor_Critic_Worker(mp.Process):
             info = []
 
         return action, actor_output_log_probs, critic_output, info
+
+    def pick_action_from_embedding_table(self, state: np.array, tf):
+        actor_input = tf.convert_to_tensor([state], dtype = tf.float32)
+        model_output = self.actor(actor_input, training = True)
+
+        noise = self.ou_noise()
+        tbs = 24496 * model_output + noise
+        
+        k_closest_actions = self.environment.get_k_closest_actions(self.k, tbs)
+        k_closest_actions_tensor = tf.expand_dims(tf.convert_to_tensor(k_closest_actions, dtype = tf.float32), axis = 1)
+        actor_input_k_repeated = tf.repeat(actor_input, self.k, axis = 0)
+        critic_outputs = self.critic([actor_input_k_repeated, k_closest_actions_tensor], training = True)
+
+        critic_arg_max = tf.math.argmax(input = critic_outputs)[0].numpy()
+
+        return k_closest_actions[critic_arg_max]
+
 
 
