@@ -23,10 +23,8 @@ PRB_SPACE = np.array(
                       10, 12, 15, 16, 18, 
                       20, 24, 25, 27, 
                       30, 32, 36, 40, 45], dtype = np.float16)
-MCS_SPACE = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 ,24],  dtype=np.float16)  
-
-I_MCS_TO_I_TBS = np.array([0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 10, 11, 12, 13,
-                            14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
+MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 ,24, 25, 26],  dtype=np.float16)  
+I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
 
 class BaseEnv(gym.Env):
@@ -59,26 +57,31 @@ class BaseEnv(gym.Env):
             self.tbs_table = json.load(tbs_json)  
 
         if (self.policy_output_format == "mcs_prb_joint"):
-            self.action_array = []
-            self.action_array.append( np.array( [0, 0] ) )
-            mapping_array = [{
-                'tbs': 0,
-                'mcs': 0.0,
-                'prb': 0.0
-            }]
+            # self.action_array = []
+            # self.action_array.append( np.array( [0, 0] ) )
+            # self.mapping_array = [{
+            #     'tbs': 0,
+            #     'mcs': 0.0,
+            #     'prb': 0.0
+            # }]
+            self.mapping_array = []
             for mcs in MCS_SPACE:
                 for prb in PRB_SPACE:
                     combo = ( I_MCS_TO_I_TBS[int(mcs)], int(prb) - 1)
                     if combo in PROHIBITED_COMBOS:
                         continue
-                    mapping_array.append(
+                    self.mapping_array.append(
                         {   
                             'tbs': self.to_tbs(int(mcs), int(prb)),
                             'mcs': mcs,
                             'prb': prb
                         }
                     )
-            self.action_array = [np.array([x['mcs'], x['prb']]) for x in sorted(mapping_array, key = lambda el: (el['tbs'], el['mcs']))] # sort by tbs/mcs
+                
+            self.mapping_array = sorted(self.mapping_array, key = lambda el: (el['tbs'], el['mcs']))
+            self.action_array = [np.array([x['mcs'], x['prb']]) for x in self.mapping_array] # sort by tbs/mcs
+            self.tbs_array = [x['tbs'] for x in self.mapping_array]
+            self.tbs_len = len(self.tbs_array)
             self.action_space = spaces.Discrete(len(self.action_array))
             self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
             self.fn_calculate_mean = self.fn_mcs_prb_joint_mean_calculation
@@ -116,22 +119,29 @@ class BaseEnv(gym.Env):
     def get_observation(self):
         return self.observation
 
+    def find_cross_over(self, arr, low, high, x):
+        if (arr[high] <= x):
+            return high
+        
+        if (arr[low] > x):
+            return low
+
+        mid = (low + high) // 2
+        if (arr[mid] <= x and arr[mid + 1] > x):
+            return mid
+        
+        if (arr[mid] < x):
+            return self.find_cross_over(arr, mid + 1, high, x)
+        
+        return self.find_cross_over(arr, low, mid - 1, x)
+
+
     def get_k_closest_actions(self, k, target_tbs):
-        distances_info = []
-        for action_idx in range(len(self.action_array)):
-            action = self.action_array[action_idx]
-            mcs = int(action[0])
-            prb = int(action[1])
-            tbs = self.to_tbs(mcs, prb)
-            distance = np.abs(tbs - target_tbs)
-            distances_info.append({
-                'action_idx': action_idx,
-                'mcs': mcs,
-                'prb': prb,
-                'distance': distance
-            })
-        sorted_distances = [ x['action_idx'] for x in sorted(distances_info, key = lambda el: (el['distance'])) ]
-        return sorted_distances[:k]
+        solution = self.find_cross_over(self.tbs_array, 0, self.tbs_len - 1, target_tbs)
+        tbs_solution = self.tbs_array[solution]
+        while (solution > 0 and self.tbs_array[solution - 1] == tbs_solution):
+            solution -= 1
+        return [solution, self.tbs_array[solution]]
 
     def get_csv_result_policy_output_columns(self) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):

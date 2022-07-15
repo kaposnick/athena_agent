@@ -29,7 +29,7 @@ decoder_env = DecoderEnv(
 config = Config()
 config.seed = 1
 config.environment = decoder_env
-config.num_episodes_to_run = 2000
+config.num_episodes_to_run = 5000
 config.randomise_random_seed = False
 config.runs_per_agent = 1
 config.save_results = True
@@ -38,29 +38,31 @@ config.load_initial_weights = False
 config.save_weights_period = 100
 config.hyperparameters = {
     'Actor_Critic_Common': {
-        'learning_rate': 1e-4,
+        'learning_rate': 5e-5,
         'use_state_value_critic': False,
         'batch_size': 64,
-        'local_update_period': 1
+        'local_update_period': 1,
+        'include_entropy_term': True,
+        'entropy_contribution': 0
     },
         
 }
 
 import copy
 for beta_range, beta in zip([beta_low], ['all']):
-    for noise_range, noise in zip([noise_high], ['all']):
+    for noise_range, noise in zip([noise_low], ['all']):
         decoder_env = DecoderEnv(
-            decoder_model_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/crc_ce_dcd_time_prob.h5',
+            decoder_model_path = '/home/naposto/phd/nokia/digital_twin/models/ce_na_na_wo_clip',
             input_norm_mean_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/scaler_mean.npy',
             input_norm_var_path = '/home/naposto/phd/nokia/digital_twin/models/new_model/scaler_var.npy',
             tbs_table_path = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.json',
             noise_range = noise_range, 
             beta_range= beta_range,
             policy_output_format = 'mcs_prb_joint',
-            version='probabilistic',
+            version='deterministic',
             sample_strategy = 'percentile_99',
             input_dims=2,
-            penalty=5
+            penalty=15
         )
         for run_idx in range(config.runs_per_agent):
             seed = run_idx * 32 + 1

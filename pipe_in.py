@@ -15,7 +15,7 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.in_scheduling_mode = False
+        self.in_scheduling_mode = True
 
         # validity byte
         # observation is: noise, beta, bsr all are integers32
@@ -86,7 +86,7 @@ class Coordinator():
             seed = i * 35
             num_episodes = 1100
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/data/csv_48/v_estimate/common_layers/w_act_stop_gradient/beta_700_high_snr.csv'
+            results_file = '/tmp/enb.csv'
             load_pretrained_weights = False
             pretrained_weights_path = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'
 
@@ -100,7 +100,7 @@ class Coordinator():
 
         config = Config()
         config.seed = seed
-        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 15, input_dims = 2, in_scheduling_mode=self.in_scheduling_mode)
+        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 0, input_dims = 2, in_scheduling_mode=self.in_scheduling_mode)
         config.num_episodes_to_run = num_episodes
         config.save_results = True
         config.results_file_path = results_file
@@ -118,29 +118,12 @@ class Coordinator():
         config.hyperparameters = {
             'Actor_Critic_Common': {
                 'learning_rate': 1e-4,
-                'linear_hidden_units': [5, 32, 64, 100],
-                'num_actor_outputs': 1,
-                'use_state_value_critic': True,
-                'final_layer_activation': ['softmax'],
+                'use_state_value_critic': False,
                 'batch_size': 64,
-                'local_update_period': 1, # in episodes
+                'local_update_period': 4,
                 'include_entropy_term': True,
-                'entropy_beta': 0.1,
-                'entropy_contrib_prob': 0.995,
-                'Actor': {
-                    'linear_hidden_units': [512, 1024, 1024]
-                },
-                'State_Value_Critic': {
-                    'linear_hidden_units': [16, 32, 32]
-                },
-                'Action_Value_Critic': {
-                    'linear_hidden_units': [16, 32, 32],
-                    'final_layer_activation': 'softmax',
-                    'vmin': -5.0001, 
-                    'vmax': 3.5001,
-                    'n_atoms': 10
-                }
-            }
+                'entropy_contribution': 0
+            },
         }
 
         return config    
@@ -231,6 +214,7 @@ class Coordinator():
                 with open(ACTOR_IN, mode='rb') as file_read:
                     is_actor_in_open = True
                     with open(ACTOR_OUT,  mode='wb') as file_write:
+                        print('Opening receive state socket...')
                         while (True):
                             content = file_read.read(16)
                             if (len(content) <= 0):

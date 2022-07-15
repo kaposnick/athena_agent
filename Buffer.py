@@ -29,7 +29,21 @@ class Buffer:
     def sample(self, tf):
         state_batch = tf.convert_to_tensor(self.state_buffer)
         action_batch = tf.convert_to_tensor(self.action_buffer)
+        action_batch = tf.cast(action_batch, dtype = tf.float32)
         reward_batch = tf.convert_to_tensor(self.reward_buffer)
+        reward_batch = tf.cast(reward_batch, dtype = tf.float32)
+
+        return state_batch, action_batch, reward_batch
+
+    def sample2(self, tf):
+        record_range = min(self.buffer_counter, self.buffer_capacity)
+        # Randomly sample indices
+        batch_indices = np.random.choice(record_range, self.batch_size)
+
+        state_batch = tf.convert_to_tensor(self.state_buffer[batch_indices])
+        action_batch = tf.convert_to_tensor(self.action_buffer[batch_indices])
+        action_batch = tf.cast(action_batch, dtype = tf.float32)
+        reward_batch = tf.convert_to_tensor(self.reward_buffer[batch_indices])
         reward_batch = tf.cast(reward_batch, dtype = tf.float32)
 
         return state_batch, action_batch, reward_batch

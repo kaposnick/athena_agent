@@ -35,12 +35,12 @@ class Master_Agent(mp.Process):
     def __str__(self) -> str:
         return 'Master Agent'
 
-    def set_process_seeds(self, tf):
+    def set_process_seeds(self):
         import os
         os.environ['PYTHONHASHSEED'] = str(self.config.seed)
         random.seed(self.config.seed)
         np.random.seed(self.config.seed)
-        tf.random.set_seed(self.config.seed)
+        self.tf.random.set_seed(self.config.seed)
 
     def compute_model_size(self, model):
         model_dtype = np.dtype(model.dtype)
@@ -54,12 +54,12 @@ class Master_Agent(mp.Process):
         shm, weights_array = get_shared_memory_ref(size, model_dtype, memory_name)
         return shm, weights_array
 
-    def initiate_models(self, tf):
+    def initiate_models(self):
         try:
             stage = 'Creating the neural networks'
             models = [
-                get_basic_actor_network(tf, self.state_size), 
-                get_basic_critic_network(tf, self.state_size, 1, self.action_size)
+                get_basic_actor_network(self.tf, self.tfp, self.state_size), 
+                get_basic_critic_network(self.tf, self.state_size)
             ]
 
             self.actor = models[0]
@@ -88,11 +88,11 @@ class Master_Agent(mp.Process):
             save_weights(self.critic, self.config.save_weights_file + '_critic.h5')
 
     def run(self):
-        tf, _, self.tfp = import_tensorflow('3', True)
-        self.set_process_seeds(tf)  
+        self.tf, _, self.tfp = import_tensorflow('3', True)
+        self.set_process_seeds()  
         exited_successfully = False
         try:
-            self.initiate_models(tf)            
+            self.initiate_models()            
 
             if (self.config.load_initial_weights):
                 print(str(self) + ' -> Loading initial weights from ' + self.config.initial_weights_path)
@@ -104,19 +104,19 @@ class Master_Agent(mp.Process):
             print(str(self) + ' -> Published weights to shared memory')
             self.master_agent_initialized.value = 1
 
-            actor_critic_optimizer = tf.keras.optimizers.Adam(learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate'])
+            actor_critic_optimizer = self.tf.keras.optimizers.Adam(learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate'])
             gradient_calculation_idx = 0
             while True:
                 import queue
                 try:
                     gradients = self.gradient_updates_queue.get(block = True, timeout = 10)
-                    actor_gradients = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[0]]
+                    actor_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[0]]
 
                     actor_critic_optimizer.apply_gradients(
                         zip(actor_gradients, self.actor.trainable_weights)
                     )
                     if (self.use_action_value_critic):
-                        critic_gradients = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[1]]
+                        critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[1]]
                         actor_critic_optimizer.apply_gradients(
                             zip(critic_gradients, self.critic.trainable_weights)
                         )
