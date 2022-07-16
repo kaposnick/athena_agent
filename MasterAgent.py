@@ -116,6 +116,13 @@ class Master_Agent(mp.Process):
                     actor_critic_optimizer.apply_gradients(
                         zip(critic_gradients, self.critic.trainable_weights)
                     )
+                    
+                    if (len(gradients) >= 3 and len(gradients) <= 4):
+                        actor_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1))  for grad in gradients[2]]
+                        actor_critic_optimizer.apply_gradients(zip(actor_gradients, self.actor.trainable_weights))
+                        critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[3]]
+                        actor_critic_optimizer.apply_gradients(zip(critic_gradients, self.critic.trainable_weights))
+
 
                     with self.optimizer_lock:
                         print(str(self) + ' -> Pushing new weights...')

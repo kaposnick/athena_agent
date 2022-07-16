@@ -2,7 +2,7 @@ import multiprocessing as mp
 import numpy as np
 import random
 from OUActionNoise import OUActionNoise
-from Buffer import Buffer
+from Buffer import EpisodeBuffer
 from env.BaseEnv import BaseEnv
 from common_utils import get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer
 from Config import Config
@@ -95,7 +95,7 @@ class Actor_Critic_Worker(mp.Process):
         std_dev = 0.2
         self.ou_noise = OUActionNoise(mean=np.zeros(1), std_deviation=float(std_dev) * np.ones(1))
         self.k = 1
-        self.buffer = Buffer(self.batch_size, self.batch_size, self.state_size, 1)
+        self.buffer = EpisodeBuffer(3000, self.batch_size, self.state_size, 1)
         self.coef = 5.159817058590249
         self.intercept = 7.6586417701293446
 
@@ -148,39 +148,68 @@ class Actor_Critic_Worker(mp.Process):
                 self.batch_info.append(info)
             self.send_results(None, self.batch_info)
 
-
-    def learn(self):
-        state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
+    def compute_grads(self, sample_method = 'a2c', add_entropy_term = True):
+        if sample_method == 'a2c':
+            state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
+        elif sample_method == 'sil':
+            state_batch, action_batch, reward_batch = self.buffer.sample_sil(self.tf, self.critic)
+        info = {}
         with self.tf.GradientTape() as tape1, self.tf.GradientTape() as tape2:
             distr_batch    =  self.actor(state_batch, training = True)
-            critic_batch   = self.critic([state_batch, action_batch], training = True)
+            critic_batch   = self.critic(state_batch, training = True)
             advantage = reward_batch - critic_batch
             
             nll = distr_batch.log_prob(action_batch)
-            # actor_loss = -1 * self.tf.math.reduce_mean(nll * advantage)
-            actor_advantage_nll = nll * (reward_batch - self.tf.math.exp(nll) * critic_batch)
+            actor_advantage_nll = nll * advantage
             actor_loss = actor_advantage_nll
 
-            entropy = distr_batch.entropy()
-            if (self.include_entropy_term):
+            if (add_entropy_term and self.include_entropy_term):
+                entropy = distr_batch.entropy()
+                info['entropy']  = self.tf.math.reduce_mean(entropy).numpy()
                 actor_loss += self.entropy_contribution * entropy
                         
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
-            critic_loss = self.tf.math.reduce_mean(self.tf.math.square(advantage))
+            critic_loss = 0.5 * self.tf.math.reduce_mean(self.tf.math.square(advantage))
+            info['actor_loss'] = self.tf.math.reduce_mean(actor_loss).numpy()
+            info['critic_loss'] = self.tf.math.reduce_mean(critic_loss).numpy()
+            info['reward'] = self.tf.math.reduce_mean(reward_batch).numpy()
+            info['actor_nll'] = self.tf.math.reduce_mean(actor_advantage_nll).numpy()
+            info['action_mean'] = self.tf.math.reduce_mean(distr_batch.mean()).numpy()
+            info['action_stddev'] = self.tf.math.reduce_mean(distr_batch.stddev()).numpy()
         
         actor_grads  = tape1.gradient(actor_loss, self.actor.trainable_weights)
-        critic_grads = tape2.gradient(critic_loss, self.critic.trainable_weights)        
+        critic_grads = tape2.gradient(critic_loss, self.critic.trainable_weights)
 
-        gradients = [actor_grads, critic_grads]
+        return actor_grads, critic_grads, info        
+        
+
+    def compute_sil_grads(self):
+        return self.compute_grads(sample_method = 'sil', add_entropy_term = False)
+
+    def compute_a2c_grads(self):
+        return self.compute_grads(sample_method = 'a2c', add_entropy_term = True)
+
+
+    def learn(self):
+        a2c_actor_grads, a2c_critic_grads, a2c_info = self.compute_a2c_grads()
+        sil_actor_grads, sil_critic_grads, sil_info = self.compute_sil_grads()
+
+        gradients = [a2c_actor_grads, a2c_critic_grads, sil_actor_grads, sil_critic_grads]
         self.gradient_updates_queue.put(gradients)
         info = {
-            'actor_loss' : actor_loss.numpy(),
-            'critic_loss': critic_loss.numpy(),
-            'reward'     : self.tf.math.reduce_mean(reward_batch).numpy(),
-            'entropy'    : self.tf.math.reduce_mean(entropy).numpy(),
-            'actor_nll'  : self.tf.math.reduce_mean(actor_advantage_nll).numpy(),
-            'action_mean': self.tf.math.reduce_mean(distr_batch.mean()).numpy(),
-            'action_stdv': self.tf.math.reduce_mean(distr_batch.stddev()).numpy()
+            'actor_loss' : a2c_info['actor_loss'],
+            'critic_loss': a2c_info['critic_loss'],
+            'reward'     : a2c_info['reward'],
+            'entropy'    : a2c_info['entropy'],
+            'actor_nll'  : a2c_info['actor_nll'],
+            'action_mean': a2c_info['action_mean'],
+            'action_stdv': a2c_info['action_stddev'],
+            'sil_actor_loss' : sil_info['actor_loss'],
+            'sil_critic_loss': sil_info['critic_loss'],
+            'sil_reward'     : sil_info['reward'],
+            'sil_actor_nll'  : sil_info['actor_nll'],
+            'sil_action_mean': sil_info['action_mean'],
+            'sil_action_stdv': sil_info['action_stddev']
         }
         return info
 

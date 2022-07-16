@@ -119,19 +119,19 @@ def get_basic_critic_network(tf, num_states, num_actions):
     state_out   = layers.Dense(16, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(state_normalization_layer)
     state_out   = layers.Dense(32, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(state_out)
     
-    action_input = layers.Input(shape = (num_actions), name = 'critic_action_input_layer')
-    # action_normalization_layer = action_normalization_layer(action_input)
-    action_out   = layers.Dense(16, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(action_input)
-    action_out   = layers.Dense(32, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(action_out)
+    # action_input = layers.Input(shape = (num_actions), name = 'critic_action_input_layer')
+    # # action_normalization_layer = action_normalization_layer(action_input)
+    # action_out   = layers.Dense(16, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(action_input)
+    # action_out   = layers.Dense(32, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(action_out)
 
-    concat  = layers.Concatenate()([state_out, action_out])    
-    output  = layers.Dense(64, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(concat)
+    # concat  = layers.Concatenate()([state_out, action_out])    
+    output  = layers.Dense(64, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(state_out)
     output  = layers.Dense(64, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(output)
     # output_pre_layer = layers.UnitNormalization()(output)
     # output_pre_layer = layers.Lambda(lambda x: x * 2)(output_pre_layer)
     output  = layers.Dense(1) (output)
 
-    model = tf.keras.Model([state_input, action_input], output)
+    model = tf.keras.Model(state_input, output)
     return model
 
 

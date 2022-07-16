@@ -1,17 +1,10 @@
 import numpy as np
 
-class Buffer:
+class EpisodeBuffer:
     def __init__(self, buffer_capacity=64, batch_size=64, num_states = 2, num_actions = 1):
-        # Number of "experiences" to store at max
         self.buffer_capacity = buffer_capacity
-        # Num of tuples to train on.
         self.batch_size = batch_size
-
-        # Its tells us num of times record() was called.
         self.buffer_counter = 0
-
-        # Instead of list of tuples as the exp.replay concept go
-        # We use different np.arrays for each tuple element
         self.state_buffer = np.zeros((self.buffer_capacity, num_states))
         self.action_buffer = np.zeros((self.buffer_capacity, num_actions))
         self.reward_buffer = np.zeros((self.buffer_capacity, 1))
@@ -35,10 +28,16 @@ class Buffer:
 
         return state_batch, action_batch, reward_batch
 
-    def sample2(self, tf):
+    def sample_sil(self, tf, critic):
         record_range = min(self.buffer_counter, self.buffer_capacity)
-        # Randomly sample indices
-        batch_indices = np.random.choice(record_range, self.batch_size)
+        valid_indices = np.arange(0, record_range)
+
+        values  = critic(self.state_buffer[valid_indices], training = False)
+        rewards = self.reward_buffer[valid_indices]
+        priorities = np.squeeze(np.maximum(rewards - values, 0))
+        probabilities = priorities / np.sum(priorities)
+
+        batch_indices = np.random.choice(valid_indices, self.batch_size, p = probabilities)
 
         state_batch = tf.convert_to_tensor(self.state_buffer[batch_indices])
         action_batch = tf.convert_to_tensor(self.action_buffer[batch_indices])
@@ -47,3 +46,4 @@ class Buffer:
         reward_batch = tf.cast(reward_batch, dtype = tf.float32)
 
         return state_batch, action_batch, reward_batch
+
