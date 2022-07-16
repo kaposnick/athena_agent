@@ -84,7 +84,7 @@ class Coordinator():
         else:
             i = 0
             seed = i * 35
-            num_episodes = 1100
+            num_episodes = 5500
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
             results_file = '/tmp/enb.csv'
             load_pretrained_weights = False
@@ -100,7 +100,7 @@ class Coordinator():
 
         config = Config()
         config.seed = seed
-        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 0, input_dims = 2, in_scheduling_mode=self.in_scheduling_mode)
+        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 15, input_dims = 2, in_scheduling_mode=self.in_scheduling_mode)
         config.num_episodes_to_run = num_episodes
         config.save_results = True
         config.results_file_path = results_file

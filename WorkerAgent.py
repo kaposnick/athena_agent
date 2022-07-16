@@ -49,7 +49,6 @@ class Actor_Critic_Worker(mp.Process):
     def init_configuration(self):
         self.local_update_period = self.config.hyperparameters['Actor_Critic_Common']['local_update_period']
         self.batch_size = self.config.hyperparameters['Actor_Critic_Common']['batch_size']
-        self.use_action_value_critic = not self.config.hyperparameters['Actor_Critic_Common']['use_state_value_critic']
         self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
         self.entropy_contribution = self.config.hyperparameters['Actor_Critic_Common']['entropy_contribution']
 
@@ -76,7 +75,7 @@ class Actor_Critic_Worker(mp.Process):
             
             models = [
                 get_basic_actor_network(self.tf, self.tfp, self.state_size), 
-                get_basic_critic_network(self.tf, self.state_size)
+                get_basic_critic_network(self.tf, self.state_size, 1)
             ]
 
             stage = 'Actor memory reference creation'
@@ -84,11 +83,10 @@ class Actor_Critic_Worker(mp.Process):
             self.shm_actor, self.np_array_actor = self.get_shared_memory_reference(self.actor, self.actor_memory_name)
             self.weights_actor = map_weights_to_shared_memory_buffer(self.actor.get_weights(), self.np_array_actor)
 
-            if (self.use_action_value_critic):
-                stage = 'Action-value critic memory reference creation'
-                self.critic = models[1]
-                self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.critic, self.critic_memory_name)
-                self.weights_critic = map_weights_to_shared_memory_buffer(self.critic.get_weights(), self.np_array_critic)
+            stage = 'Action-value critic memory reference creation'
+            self.critic = models[1]
+            self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.critic, self.critic_memory_name)
+            self.weights_critic = map_weights_to_shared_memory_buffer(self.critic.get_weights(), self.np_array_critic)
         except Exception as e:
             self.print('Stage: {}, Error initiating models: {}'.format(stage, e))
             raise e
@@ -104,46 +102,12 @@ class Actor_Critic_Worker(mp.Process):
     def update_weights(self):
         import copy
         with self.optimizer_lock:
-            self.actor.set_weights(copy.deepcopy(self.weights_actor))
-            if (self.use_action_value_critic):
-                self.critic.set_weights(copy.deepcopy(self.weights_critic))
-
-    def compute_critic_loss_alt(self):
-        probs = []
-        def negloglik(y_distr, y_true):
-            neg_log_prob = -y_distr.log_prob(y_true)
-            prob = self.tf.math.exp( -1 * neg_log_prob)
-            probs.append(prob)
-            return neg_log_prob
-        critic_loss = self.tf.reduce_mean([negloglik(y_distr, y_true) for y_distr, y_true in zip(self.batch_critic_outputs, self.rewards)])
-        return critic_loss, {'probs': self.tf.convert_to_tensor(np.mean(probs))}
-
-    def compute_critic_loss(self):
-        critic_loss = self.tf.math.reduce_mean(self.tf.math.square(self.rewards, self.critic_mean))
-        return critic_loss, None        
-
-    def compute_actor_loss(self):
-        actor_loss = -1 * self.tf.math.reduce_mean(self.critic_mean)        
-        return actor_loss, None
-
-    def compute_losses(self):
-        self.rewards = self.tf.expand_dims(self.tf.convert_to_tensor(self.batch_rewards, dtype = self.tf.float32), axis = 1) # (batch_size, 1)
-        self.actions = self.tf.convert_to_tensor(self.batch_action)
-        self.critic_mean = self.tf.convert_to_tensor(self.batch_critic_outputs)
-
-        actor_loss, actor_info  = self.compute_actor_loss(self.tf)
-        critic_loss, critic_info = self.compute_critic_loss(self.tf)
-        
-        ret_info = {
-            'actor_loss'    : actor_loss.numpy(),
-            'critic_loss'   : critic_loss.numpy()
-        }
-        return actor_loss, critic_loss, ret_info
+            self.actor.set_weights(copy.deepcopy(self.weights_actor))            
+            self.critic.set_weights(copy.deepcopy(self.weights_critic))
 
     def send_gradients(self, tape, actor_loss, critic_loss):
-        gradients = [tape.gradient(actor_loss, self.actor.trainable_weights)]
-        if (self.use_action_value_critic):
-            gradients.append(tape.gradient(critic_loss, self.critic.trainable_weights))
+        gradients = [tape.gradient(actor_loss, self.actor.trainable_weights)]        
+        gradients.append(tape.gradient(critic_loss, self.critic.trainable_weights))
         self.gradient_updates_queue.put(gradients)
         return gradients
 
@@ -188,13 +152,13 @@ class Actor_Critic_Worker(mp.Process):
     def learn(self):
         state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
         with self.tf.GradientTape() as tape1, self.tf.GradientTape() as tape2:
-            _, distr_batch =  self.actor(state_batch, training = True)
-            critic_batch   = self.critic(state_batch, training = True)
+            distr_batch    =  self.actor(state_batch, training = True)
+            critic_batch   = self.critic([state_batch, action_batch], training = True)
             advantage = reward_batch - critic_batch
             
             nll = distr_batch.log_prob(action_batch)
             # actor_loss = -1 * self.tf.math.reduce_mean(nll * advantage)
-            actor_advantage_nll = nll * advantage
+            actor_advantage_nll = nll * (reward_batch - self.tf.math.exp(nll) * critic_batch)
             actor_loss = actor_advantage_nll
 
             entropy = distr_batch.entropy()
@@ -204,8 +168,8 @@ class Actor_Critic_Worker(mp.Process):
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
             critic_loss = self.tf.math.reduce_mean(self.tf.math.square(advantage))
         
-        critic_grads = tape1.gradient(critic_loss, self.critic.trainable_weights)        
-        actor_grads = tape2.gradient(actor_loss, self.actor.trainable_weights)
+        actor_grads  = tape1.gradient(actor_loss, self.actor.trainable_weights)
+        critic_grads = tape2.gradient(critic_loss, self.critic.trainable_weights)        
 
         gradients = [actor_grads, critic_grads]
         self.gradient_updates_queue.put(gradients)
@@ -280,9 +244,9 @@ class Actor_Critic_Worker(mp.Process):
 
     def pick_action_from_embedding_table(self, state: np.array):
         actor_input = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
-        params, distr = self.actor(actor_input)
+        distr = self.actor(actor_input)
 
-        heta_param = np.random.normal(loc = 0, scale = .2)
+        heta_param = np.random.normal(loc = 0, scale = 1)
         mean = distr.mean()
         stddev = distr.stddev()
         action_hat = mean + heta_param * stddev
@@ -301,7 +265,7 @@ class Actor_Critic_Worker(mp.Process):
         return action_idx, action
 
     def print(self, string_to_print, end = None):
-        if (self.worker_num == 15):
+        if (self.worker_num == 2):
             print(str(self) + ' -> ' + string_to_print, end=end)
 
 

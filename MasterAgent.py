@@ -30,8 +30,6 @@ class Master_Agent(mp.Process):
         self.actor_memory_name = actor_memory_name
         self.critic_memory_name = critic_memory_name
 
-        self.use_action_value_critic = not self.config.hyperparameters['Actor_Critic_Common']['use_state_value_critic']
-
     def __str__(self) -> str:
         return 'Master Agent'
 
@@ -59,14 +57,14 @@ class Master_Agent(mp.Process):
             stage = 'Creating the neural networks'
             models = [
                 get_basic_actor_network(self.tf, self.tfp, self.state_size), 
-                get_basic_critic_network(self.tf, self.state_size)
+                get_basic_critic_network(self.tf, self.state_size, 1)
             ]
 
             self.actor = models[0]
             self.actor_memory_bytes.value, actor_dtype = self.compute_model_size(self.actor)
-            if (self.use_action_value_critic):
-                self.critic = models[1]
-                self.critic_memory_bytes.value, critic_dtype = self.compute_model_size(self.critic)
+            
+            self.critic = models[1]
+            self.critic_memory_bytes.value, critic_dtype = self.compute_model_size(self.critic)
             while (self.memory_created.value == 0):
                 pass
 
@@ -74,18 +72,16 @@ class Master_Agent(mp.Process):
             self.shm_actor, self.np_array_actor = self.get_shared_memory_reference(self.actor, self.actor_memory_name)
             self.weights_actor = map_weights_to_shared_memory_buffer(self.actor.get_weights(), self.np_array_actor)
 
-            if (self.use_action_value_critic):
-                stage = 'Critic memory reference creation'
-                self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.critic, self.critic_memory_name)
-                self.weights_critic = map_weights_to_shared_memory_buffer(self.critic.get_weights(), self.np_array_critic)
+            stage = 'Critic memory reference creation'
+            self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.critic, self.critic_memory_name)
+            self.weights_critic = map_weights_to_shared_memory_buffer(self.critic.get_weights(), self.np_array_critic)
         except Exception as e:
             print(str(self) + ' -> Stage: {}, Error initiating models: {}'.format(stage, e))
             raise e
 
     def save_weights(self):
         save_weights(self.actor, self.config.save_weights_file, False)
-        if (self.use_action_value_critic):
-            save_weights(self.critic, self.config.save_weights_file + '_critic.h5')
+        save_weights(self.critic, self.config.save_weights_file + '_critic.h5')
 
     def run(self):
         self.tf, _, self.tfp = import_tensorflow('3', True)
@@ -99,9 +95,10 @@ class Master_Agent(mp.Process):
                 self.actor.load_weights(self.config.initial_weights_path)
             
             publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)                
-            if (self.use_action_value_critic):
-                publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)                
-            print(str(self) + ' -> Published weights to shared memory')
+            print(str(self) + ' -> Published actor weights to shared memory')
+            
+            publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
+            print(str(self) + ' -> Published critic weights to shared memory')
             self.master_agent_initialized.value = 1
 
             actor_critic_optimizer = self.tf.keras.optimizers.Adam(learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate'])
@@ -115,18 +112,15 @@ class Master_Agent(mp.Process):
                     actor_critic_optimizer.apply_gradients(
                         zip(actor_gradients, self.actor.trainable_weights)
                     )
-                    if (self.use_action_value_critic):
-                        critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[1]]
-                        actor_critic_optimizer.apply_gradients(
-                            zip(critic_gradients, self.critic.trainable_weights)
-                        )
+                    critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[1]]
+                    actor_critic_optimizer.apply_gradients(
+                        zip(critic_gradients, self.critic.trainable_weights)
+                    )
 
                     with self.optimizer_lock:
                         print(str(self) + ' -> Pushing new weights...')
                         publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)
-
-                        if (self.use_action_value_critic):
-                            publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
+                        publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
 
                     gradient_calculation_idx += 1
                     if (self.config.save_weights and gradient_calculation_idx % self.config.save_weights_period == 0):

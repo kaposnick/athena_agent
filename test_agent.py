@@ -38,7 +38,7 @@ config.load_initial_weights = False
 config.save_weights_period = 100
 config.hyperparameters = {
     'Actor_Critic_Common': {
-        'learning_rate': 5e-5,
+        'learning_rate': 1e-4,
         'use_state_value_critic': False,
         'batch_size': 64,
         'local_update_period': 1,
