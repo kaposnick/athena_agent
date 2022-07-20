@@ -14,7 +14,7 @@ REWARD_IN = '/tmp/return_in'
 class Coordinator():
     def __init__(self):
         self.total_agents = 8
-        self.verbose = 0
+        self.verbose = 1
         self.in_scheduling_mode = True
 
         # validity byte

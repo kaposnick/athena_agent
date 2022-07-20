@@ -296,10 +296,7 @@ class Actor_Critic_Worker(mp.Process):
 
         tbs_hat = np.exp(self.coef * action_hat + self.intercept) - 1
         
-        k_closest_actions = self.environment.get_k_closest_actions(self.k, tbs_hat)
-
-        action_idx = k_closest_actions[0]
-        tbs        = k_closest_actions[1]
+        action_idx, tbs = self.environment.get_closest_actions(tbs_hat)
 
         action = (np.log(tbs + 1) - self.intercept) / self.coef
         self.print('tbs hat: {} - tbs: {}'.format(tbs_hat, tbs))

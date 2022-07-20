@@ -77,11 +77,27 @@ class BaseEnv(gym.Env):
                             'prb': prb
                         }
                     )
-                
+
             self.mapping_array = sorted(self.mapping_array, key = lambda el: (el['tbs'], el['mcs']))
             self.action_array = [np.array([x['mcs'], x['prb']]) for x in self.mapping_array] # sort by tbs/mcs
-            self.tbs_array = [x['tbs'] for x in self.mapping_array]
+            
+            self.tbs_array = []
+            self.tbs_to_action_array = []
+
+            tbs = None
+            tbs_list = None
+            for action_idx in range(len(self.mapping_array)):
+                x = self.mapping_array[action_idx]
+                x_tbs = x['tbs']
+                if (tbs is None or x_tbs > tbs):
+                    # got to a new TBS area
+                    tbs = x_tbs
+                    self.tbs_array.append(tbs)
+                    tbs_list = []
+                    self.tbs_to_action_array.append(tbs_list)
+                tbs_list.append(np.array([action_idx, x['prb'], x['mcs']]))
             self.tbs_len = len(self.tbs_array)
+            
             self.action_space = spaces.Discrete(len(self.action_array))
             self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
             self.fn_calculate_mean = self.fn_mcs_prb_joint_mean_calculation
@@ -134,6 +150,14 @@ class BaseEnv(gym.Env):
             return self.find_cross_over(arr, mid + 1, high, x)
         
         return self.find_cross_over(arr, low, mid - 1, x)
+
+    def get_closest_actions(self, tbs_hat):
+        tbs_array_idx = self.find_cross_over(self.tbs_array, 0, self.tbs_len - 1, tbs_hat)
+        tbs_target = self.tbs_array[tbs_array_idx]
+
+        action_index = int(self.tbs_to_action_array[tbs_array_idx][0][0]) # get the one with the lowest PRB
+        
+        return action_index, tbs_target
 
 
     def get_k_closest_actions(self, k, target_tbs):

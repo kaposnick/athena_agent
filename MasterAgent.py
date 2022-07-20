@@ -124,8 +124,8 @@ class Master_Agent(mp.Process):
 
         return actor_grads, critic_grads, info
 
-    def compute_sil_grads(self):
-        state_batch, action_batch, reward_batch = self.buffer.sample_sil(self.tf, self.critic)
+    def compute_sil_grads(self, uniform = True):
+        state_batch, action_batch, reward_batch = self.buffer.sample_sil(self.tf, self.critic, uniform = uniform)
         return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = False)
 
     def compute_a2c_grads(self):
@@ -135,7 +135,7 @@ class Master_Agent(mp.Process):
 
     def learn(self):
         a2c_actor_grads, a2c_critic_grads, a2c_info = self.compute_a2c_grads()
-        sil_actor_grads, sil_critic_grads, sil_info = self.compute_sil_grads()
+        sil_actor_grads, sil_critic_grads, sil_info = self.compute_sil_grads(uniform = False)
         self.tf_apply_gradients(a2c_actor_grads, a2c_critic_grads, sil_actor_grads, sil_critic_grads)
         info = {
             'actor_loss' : a2c_info['actor_loss'].numpy(),
@@ -220,12 +220,15 @@ class Master_Agent(mp.Process):
             print(str(self) + ' -> Published critic weights to shared memory')
             self.master_agent_initialized.value = 1
 
-            lr_schedule = self.tf.keras.optimizers.schedules.ExponentialDecay(
-                initial_learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate'],
-                decay_steps = 3,
-                decay_rate  = 0.995
+            # lr_schedule = self.tf.keras.optimizers.schedules.ExponentialDecay(
+            #     initial_learning_rate = ,
+            #     decay_steps = 3,
+            #     decay_rate  = 0.995
+            # )
+            # self.actor_critic_optimizer = self.tf.keras.optimizers.Adam(learning_rate = lr_schedule)
+            self.actor_critic_optimizer = self.tf.keras.optimizers.Adam(
+                learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate']                
             )
-            self.actor_critic_optimizer = self.tf.keras.optimizers.Adam(learning_rate = lr_schedule)
             gradient_calculation_idx = 0
             sample_idx = 0
             self.buffer.reset_episode()
