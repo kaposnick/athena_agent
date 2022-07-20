@@ -127,7 +127,8 @@ class DecoderEnv(BaseEnv):
                 # 99% percentile -> Z = 2.326
                 decoding_time = (dcd_time_mean + 2.326 * dcd_time_stdv)[0][0].numpy()
         else:
-            decoding_time = decoding_time_output
+            decoding_time = decoding_time_output.numpy()[0][0]
+
 
         crc = np.random.binomial(n = 1, p = decode_prob)[0][0] 
 

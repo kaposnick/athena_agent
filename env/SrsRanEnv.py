@@ -64,8 +64,11 @@ class SrsRanEnv(BaseEnv):
                 result = self.result_nd_array[1:]
                 self.result_nd_array[0] = 0
             else:
-                result = np.array([True, 1, 0])
-            crc, decoding_time, tbs = result
+                result = np.array([True, 1, 0, 0, 0])
+            crc, decoding_time, tbs, mcs_res, prb_res = result
+            if (mcs_res != mcs or prb_res != prb):
+                string_inside = 'Wrong combination of {}, {}'.format( (mcs, prb), (mcs_res, prb_res))
+                print('{} - {}'.format(str(self), string_inside))
             reward, _ = super().get_reward(mcs, prb, crc, decoding_time, tbs)
             if (self.verbose == 1):
                 print('{} - {}'.format(str(self), result.tolist() + [reward]))

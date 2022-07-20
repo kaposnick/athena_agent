@@ -153,11 +153,7 @@ class Actor_Critic_Worker(mp.Process):
                 self.batch_info.append(info)
             self.send_results(self.batch_info)
 
-    def compute_grads(self, sample_method = 'a2c', add_entropy_term = True):
-        if sample_method == 'a2c':
-            state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
-        elif sample_method == 'sil':
-            state_batch, action_batch, reward_batch = self.buffer.sample_sil(self.tf, self.critic)
+    def compute_grads(self, state_batch, action_batch, reward_batch, add_entropy_term = True):            
         info = {}
         with self.tf.GradientTape() as tape1, self.tf.GradientTape() as tape2:
             distr_batch    =  self.actor(state_batch, training = True)
@@ -170,17 +166,17 @@ class Actor_Critic_Worker(mp.Process):
 
             if (add_entropy_term and self.include_entropy_term):
                 entropy = distr_batch.entropy()
-                info['entropy']  = self.tf.math.reduce_mean(entropy).numpy()
-                actor_loss += self.entropy_contribution * entropy
+                info['entropy']  = self.tf.math.reduce_mean(entropy)
+                actor_loss -= self.entropy_contribution * entropy
                         
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
             critic_loss = 0.5 * self.tf.math.reduce_mean(self.tf.math.square(advantage))
-            info['actor_loss'] = self.tf.math.reduce_mean(actor_loss).numpy()
-            info['critic_loss'] = self.tf.math.reduce_mean(critic_loss).numpy()
-            info['reward'] = self.tf.math.reduce_mean(reward_batch).numpy()
-            info['actor_nll'] = self.tf.math.reduce_mean(actor_advantage_nll).numpy()
-            info['action_mean'] = self.tf.math.reduce_mean(distr_batch.mean()).numpy()
-            info['action_stddev'] = self.tf.math.reduce_mean(distr_batch.stddev()).numpy()
+            info['actor_loss'] = self.tf.math.reduce_mean(actor_loss)
+            info['critic_loss'] = self.tf.math.reduce_mean(critic_loss)
+            info['reward'] = self.tf.math.reduce_mean(reward_batch)
+            info['actor_nll'] = self.tf.math.reduce_mean(actor_advantage_nll)
+            info['action_mean'] = self.tf.math.reduce_mean(distr_batch.mean())
+            info['action_stddev'] = self.tf.math.reduce_mean(distr_batch.stddev())
         
         actor_grads  = tape1.gradient(actor_loss, self.actor.trainable_weights)
         critic_grads = tape2.gradient(critic_loss, self.critic.trainable_weights)
@@ -189,10 +185,12 @@ class Actor_Critic_Worker(mp.Process):
         
 
     def compute_sil_grads(self):
-        return self.compute_grads(sample_method = 'sil', add_entropy_term = False)
+        state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
+        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = False)
 
     def compute_a2c_grads(self):
-        return self.compute_grads(sample_method = 'a2c', add_entropy_term = True)
+        state_batch, action_batch, reward_batch = self.buffer.sample_sil(self.tf, self.critic)
+        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = True)
 
 
     def learn(self):
@@ -202,21 +200,27 @@ class Actor_Critic_Worker(mp.Process):
         gradients = [a2c_actor_grads, a2c_critic_grads, sil_actor_grads, sil_critic_grads]
         self.gradient_updates_queue.put(gradients)
         info = {
-            'actor_loss' : a2c_info['actor_loss'],
-            'critic_loss': a2c_info['critic_loss'],
-            'reward'     : a2c_info['reward'],
-            'entropy'    : a2c_info['entropy'],
-            'actor_nll'  : a2c_info['actor_nll'],
-            'action_mean': a2c_info['action_mean'],
-            'action_stdv': a2c_info['action_stddev'],
-            'sil_actor_loss' : sil_info['actor_loss'],
-            'sil_critic_loss': sil_info['critic_loss'],
-            'sil_reward'     : sil_info['reward'],
-            'sil_actor_nll'  : sil_info['actor_nll'],
-            'sil_action_mean': sil_info['action_mean'],
-            'sil_action_stdv': sil_info['action_stddev']
+            'actor_loss' : a2c_info['actor_loss'].numpy(),
+            'critic_loss': a2c_info['critic_loss'].numpy(),
+            'reward'     : a2c_info['reward'].numpy(),
+            'entropy'    : a2c_info['entropy'].numpy(),
+            'actor_nll'  : a2c_info['actor_nll'].numpy(),
+            'action_mean': a2c_info['action_mean'].numpy(),
+            'action_stdv': a2c_info['action_stddev'].numpy(),
+            'sil_actor_loss' : sil_info['actor_loss'].numpy(),
+            'sil_critic_loss': sil_info['critic_loss'].numpy(),
+            'sil_reward'     : sil_info['reward'].numpy(),
+            'sil_actor_nll'  : sil_info['actor_nll'].numpy(),
+            'sil_action_mean': sil_info['action_mean'].numpy(),
+            'sil_action_stdv': sil_info['action_stddev'].numpy()
         }
         return info
+
+    def convert_to_real_action_applied(self, info):
+        mcs = int(info['mcs'])
+        prb = int(info['prb'])
+        tbs = self.environment.to_tbs(mcs, prb)
+        return (np.log(tbs + 1) - self.intercept) / self.coef
 
     def run(self) -> None:
         if (not self.in_scheduling_mode):
@@ -228,6 +232,7 @@ class Actor_Critic_Worker(mp.Process):
         try:
             self.initiate_models()
             self.environment.setup(self.worker_num, self.total_workers)
+            self.tf_compute_grads = self.tf.function(self.compute_grads)
             
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
@@ -259,7 +264,8 @@ class Actor_Critic_Worker(mp.Process):
                         next_state, reward, done, info = self.environment.step([action_idx])
                         self.print('Executing action time: {}'.format(time.time() - step_time))
 
-                        self.buffer.record((state, action, reward))
+                        real_action_applied = self.convert_to_real_action_applied(info)
+                        self.buffer.record((state, real_action_applied, reward))
                         self.batch_info.append(info)
                         state = next_state
                         batch_idx += 1

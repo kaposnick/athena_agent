@@ -210,10 +210,17 @@ class BaseEnv(gym.Env):
         else:
             if tbs is None:
                 tbs = self.to_tbs(mcs, prb)
-            if (not crc or decoding_time > self.decode_deadline):
+            if (not crc):
                 reward = -1 * self.min_penalty
             else:
-                reward += (tbs / ( 8 * 1024))
+                if (decoding_time > self.decode_deadline):
+                    reward = -1 * self.min_penalty
+                else:
+                    if decoding_time == self.decode_deadline:
+                        decoding_time -= 10                
+                    reward = (tbs / ( 8 * 1024)) * ( 1 + 1 / (self.decode_deadline - decoding_time) )
+                # if (decoding_time > self.decode_deadline):
+                #     reward -= 5 * ((decoding_time - self.decode_deadline) / self.decode_deadline)
         return reward, tbs
 
     def get_agent_result(self, reward, mcs, prb, crc, decoding_time, tbs):

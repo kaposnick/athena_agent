@@ -15,7 +15,7 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.in_scheduling_mode = False
+        self.in_scheduling_mode = True
 
         # validity byte
         # observation is: noise, beta, bsr all are integers32
@@ -84,9 +84,9 @@ class Coordinator():
         else:
             i = 0
             seed = i * 35
-            num_episodes = 5500
+            num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/enb_high_snr_cpu_v_high_fixed_19.csv'
+            results_file = '/home/naposto/phd/nokia/enb_high_snr_cpu_high_agent.csv'
             load_pretrained_weights = False
             pretrained_weights_path = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'
 
@@ -120,9 +120,9 @@ class Coordinator():
                 'learning_rate': 1e-4,
                 'use_state_value_critic': False,
                 'batch_size': 64,
-                'local_update_period': 4,
+                'local_update_period': 1,
                 'include_entropy_term': True,
-                'entropy_contribution': 0
+                'entropy_contribution': 0.0
             },
         }
 

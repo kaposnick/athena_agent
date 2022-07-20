@@ -83,12 +83,29 @@ class Master_Agent(mp.Process):
         save_weights(self.actor, self.config.save_weights_file, False)
         save_weights(self.critic, self.config.save_weights_file + '_critic.h5')
 
+    def compute_gradients(self, a2c_ac_grads, a2c_cr_grads, sil_ac_grads, sil_cr_grads):
+        actor_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in a2c_ac_grads]
+        self.actor_critic_optimizer.apply_gradients(
+            zip(actor_gradients, self.actor.trainable_weights)
+        )
+        critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in a2c_cr_grads]
+        self.actor_critic_optimizer.apply_gradients(
+            zip(critic_gradients, self.critic.trainable_weights)
+        )
+        
+        if (sil_ac_grads is not None and sil_cr_grads is not None):
+            actor_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1))  for grad in sil_ac_grads]
+            self.actor_critic_optimizer.apply_gradients(zip(actor_gradients, self.actor.trainable_weights))
+            critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in sil_cr_grads]
+            self.actor_critic_optimizer.apply_gradients(zip(critic_gradients, self.critic.trainable_weights))
+
     def run(self):
         self.tf, _, self.tfp = import_tensorflow('3', True)
         self.set_process_seeds()  
         exited_successfully = False
         try:
             self.initiate_models()            
+            self.tf_compute_gradients = self.tf.function(self.compute_gradients)
 
             if (self.config.load_initial_weights):
                 print(str(self) + ' -> Loading initial weights from ' + self.config.initial_weights_path)
@@ -101,28 +118,13 @@ class Master_Agent(mp.Process):
             print(str(self) + ' -> Published critic weights to shared memory')
             self.master_agent_initialized.value = 1
 
-            actor_critic_optimizer = self.tf.keras.optimizers.Adam(learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate'])
+            self.actor_critic_optimizer = self.tf.keras.optimizers.Adam(learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate'])
             gradient_calculation_idx = 0
             while True:
                 import queue
                 try:
                     gradients = self.gradient_updates_queue.get(block = True, timeout = 10)
-                    actor_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[0]]
-
-                    actor_critic_optimizer.apply_gradients(
-                        zip(actor_gradients, self.actor.trainable_weights)
-                    )
-                    critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[1]]
-                    actor_critic_optimizer.apply_gradients(
-                        zip(critic_gradients, self.critic.trainable_weights)
-                    )
-                    
-                    if (len(gradients) >= 3 and len(gradients) <= 4):
-                        actor_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1))  for grad in gradients[2]]
-                        actor_critic_optimizer.apply_gradients(zip(actor_gradients, self.actor.trainable_weights))
-                        critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in gradients[3]]
-                        actor_critic_optimizer.apply_gradients(zip(critic_gradients, self.critic.trainable_weights))
-
+                    self.tf_compute_gradients(gradients[0], gradients[1], gradients[2], gradients[3])
 
                     with self.optimizer_lock:
                         print(str(self) + ' -> Pushing new weights...')

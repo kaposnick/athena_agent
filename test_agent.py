@@ -7,10 +7,11 @@ tbs_table_path    = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.js
 
 beta_low = (1, 50)
 beta_medium = (50, 650)
-beta_high = (650, 1000)
+beta_high = (700, 700)
+beta_v_high = (800, 800)
 beta_all = (1, 1000)
 
-noise_low = (-15,50)
+noise_low = (-15,-15)
 noise_medium = (50,80)
 noise_high = (80, 100)
 noise_all = (-15, 100)
