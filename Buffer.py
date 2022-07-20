@@ -9,7 +9,9 @@ class EpisodeBuffer:
         self.action_buffer = np.zeros((self.buffer_capacity, num_actions))
         self.reward_buffer = np.zeros((self.buffer_capacity, 1))
 
-    # Takes (s,a,r,s') obervation tuple as input
+    def reset_episode(self):
+        self.episode_start_index = self.buffer_counter
+
     def record(self, obs_tuple):
         index = self.buffer_counter % self.buffer_capacity
 
@@ -20,10 +22,13 @@ class EpisodeBuffer:
         self.buffer_counter += 1
 
     def sample(self, tf):
-        state_batch = tf.convert_to_tensor(self.state_buffer)
-        action_batch = tf.convert_to_tensor(self.action_buffer)
+        valid_indices = np.arange(self.episode_start_index, self.episode_start_index + self.batch_size)
+        valid_indices = valid_indices % self.buffer_capacity
+
+        state_batch = tf.convert_to_tensor(self.state_buffer[valid_indices])
+        action_batch = tf.convert_to_tensor(self.action_buffer[valid_indices])
         action_batch = tf.cast(action_batch, dtype = tf.float32)
-        reward_batch = tf.convert_to_tensor(self.reward_buffer)
+        reward_batch = tf.convert_to_tensor(self.reward_buffer[valid_indices])
         reward_batch = tf.cast(reward_batch, dtype = tf.float32)
 
         return state_batch, action_batch, reward_batch

@@ -7,16 +7,16 @@ from env.BaseEnv import BaseEnv
 from common_utils import get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer
 from Config import Config
 import time
+import copy
 
 class Actor_Critic_Worker(mp.Process):
     def __init__(self, 
                 environment: BaseEnv, config: Config,
                 worker_num: np.int32, total_workers: np.int32, 
                 episodes_to_run: np.int32, state_size, action_size, 
-                successfully_started_worker: mp.Value, 
-                optimizer_lock: mp.Lock, write_to_results_queue_lock: mp.Lock,
-                results_queue: mp.Queue, gradient_updates_queue: mp.Queue,
-                episode_number: mp.Value,
+                successfully_started_worker: mp.Value,
+                sample_buffer_queue: mp.Queue, batch_info_queue: mp.Queue, 
+                optimizer_lock: mp.Lock, 
                 in_scheduling_mode: str,
                 actor_memory_name = 'model_actor',
                 critic_memory_name = 'model_critic') -> None:
@@ -33,10 +33,8 @@ class Actor_Critic_Worker(mp.Process):
         # multiprocessing variables
         self.successfully_started_worker = successfully_started_worker
         self.optimizer_lock = optimizer_lock
-        self.write_to_results_queue_lock = write_to_results_queue_lock
-        self.results_queue = results_queue
-        self.gradient_updates_queue = gradient_updates_queue
-        self.episode_number = episode_number
+        self.sample_buffer_queue = sample_buffer_queue
+        self.batch_info_queue = batch_info_queue
         self.in_scheduling_mode = in_scheduling_mode
         self.actor_memory_name = actor_memory_name
         self.critic_memory_name = critic_memory_name
@@ -49,8 +47,7 @@ class Actor_Critic_Worker(mp.Process):
     def init_configuration(self):
         self.local_update_period = self.config.hyperparameters['Actor_Critic_Common']['local_update_period']
         self.batch_size = self.config.hyperparameters['Actor_Critic_Common']['batch_size']
-        self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
-        self.entropy_contribution = self.config.hyperparameters['Actor_Critic_Common']['entropy_contribution']
+        
 
     
 
@@ -99,8 +96,8 @@ class Actor_Critic_Worker(mp.Process):
         self.coef = 5.159817058590249
         self.intercept = 7.6586417701293446
 
+
     def update_weights(self):
-        import copy
         with self.optimizer_lock:
             self.actor.set_weights(copy.deepcopy(self.weights_actor))            
             self.critic.set_weights(copy.deepcopy(self.weights_critic))
@@ -246,6 +243,7 @@ class Actor_Critic_Worker(mp.Process):
                     self.print('Updating weights time: {}'.format(time.time() - update_weights_time))
 
                 self.batch_info = []
+                self.sample_buffer = []
 
                 batch_idx = 0
                 while batch_idx < self.batch_size:
@@ -265,19 +263,23 @@ class Actor_Critic_Worker(mp.Process):
                         self.print('Executing action time: {}'.format(time.time() - step_time))
 
                         real_action_applied = self.convert_to_real_action_applied(info)
-                        self.buffer.record((state, real_action_applied, reward))
+                        
+                        self.sample_buffer.append((state, real_action_applied, reward))
                         self.batch_info.append(info)
                         state = next_state
                         batch_idx += 1
 
-                learning_time = time.time()
-                info = self.learn()    
-                self.print('Learning time: {}'.format(time.time() - learning_time))
+                self.sample_buffer_queue.put(self.sample_buffer)
+                self.batch_info_queue.put(self.batch_info)
 
-                self.print('Sending results...')            
-                sending_results_time = time.time()
-                self.send_results(info)           
-                self.print('Sending results time: {}'.format(time.time() - sending_results_time))     
+                # learning_time = time.time()
+                # info = self.learn()    
+                # self.print('Learning time: {}'.format(time.time() - learning_time))
+
+                # self.print('Sending results...')            
+                # sending_results_time = time.time()
+                # self.send_results(info)           
+                # self.print('Sending results time: {}'.format(time.time() - sending_results_time))     
                 
         finally:
             self.print('Exiting...')
@@ -305,7 +307,7 @@ class Actor_Critic_Worker(mp.Process):
         return action_idx, action
 
     def print(self, string_to_print, end = None):
-        if (self.worker_num == 2):
+        if (self.worker_num < 10):
             print(str(self) + ' -> ' + string_to_print, end=end)
 
 

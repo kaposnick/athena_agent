@@ -77,14 +77,14 @@ class A3CAgent(BaseAgent):
         else:
             self.episodes_per_process = -1 # run indefinitely
         self.episode_number                    = mp.Value('i', 0)        
-        self.results_queue                     = mp.Queue()
-        self.write_to_results_queue_lock  = mp.Lock()        
+        self.results_queue                     = mp.Queue()  
         
         if (not self.in_scheduling_mode):
             self.run_in_collect_stats_mode(processes_started_successfully, inputs)
             return
         
-        gradient_updates_queue            = mp.Queue()
+        sample_buffer_queue               = mp.Queue()
+        batch_info_queue                  = mp.Queue()
         optimizer_lock                    = mp.Lock()
         actor_memory_size_in_bytes        = mp.Value('i', 0)
         critic_memory_size_in_bytes       = mp.Value('i', 0)
@@ -95,12 +95,16 @@ class A3CAgent(BaseAgent):
 
         self.use_action_value_critic = not self.config.hyperparameters['Actor_Critic_Common']['use_state_value_critic']
         self.optimizer_worker = Master_Agent(
+                self.environment,
                 self.hyperparameters,
                 self.config, self.state_size, self.action_size,
                 actor_memory_size_in_bytes, critic_memory_size_in_bytes,
                 memory_created, master_agent_initialized,
-                gradient_updates_queue, master_agent_stop,
+                sample_buffer_queue, batch_info_queue,
+                self.results_queue,
+                master_agent_stop,
                 optimizer_lock,
+                self.episode_number,
                 self.actor_memory_name, self.critic_memory_name
             )
         
@@ -134,9 +138,8 @@ class A3CAgent(BaseAgent):
                     worker_num, self.num_processes,
                     self.episodes_per_process, self.state_size, self.action_size,
                     successfully_started_worker,
-                    optimizer_lock, self.write_to_results_queue_lock,
-                    self.results_queue, gradient_updates_queue,
-                    self.episode_number, in_scheduling_mode=True)
+                    sample_buffer_queue, batch_info_queue,
+                    optimizer_lock, in_scheduling_mode=True)
                 worker.start()
                 self.worker_processes.append(worker)
             while (successfully_started_worker.value < self.num_processes):
@@ -158,8 +161,9 @@ class A3CAgent(BaseAgent):
         with open(save_file, 'w') as f:
             additional_env_columns = self.environment.get_csv_result_policy_output_columns()
             f.write('|'.join(COLUMNS + additional_env_columns) + '\n')            
+            episode = 0
             while True:
-                with self.write_to_results_queue_lock:
+                with episode_number.get_lock():
                     carry_on = episode_number.value < self.config.num_episodes_to_run
                     episode = episode_number.value
                 if carry_on:

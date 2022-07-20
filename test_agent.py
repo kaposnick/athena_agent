@@ -50,7 +50,7 @@ config.hyperparameters = {
 }
 
 import copy
-for beta_range, beta in zip([beta_high], ['all']):
+for beta_range, beta in zip([beta_low], ['all']):
     for noise_range, noise in zip([noise_low], ['all']):
         decoder_env = DecoderEnv(
             decoder_model_path = '/home/naposto/phd/nokia/digital_twin/models/ce_na_na_wo_clip',
