@@ -147,7 +147,7 @@ class BaseEnv(gym.Env):
         if (self.policy_output_format == "mcs_prb_joint"):
             columns = ['crc_ok', 
                     'dec_time_ok_ratio', 'dec_time_ok_mean', 'dec_time_ok_std', 'dec_time_ko_mean', 'dec_time_ko_std', 
-                    'throughput_ok_mean', 'throughput_ok_std', 'throughput_ko_mean', 'throughput_ko_std', 'mcs_prb']
+                    'throughput_ok_mean', 'throughput_ok_std']
             return columns
         elif (self.policy_output_format == "mcs_prb_independent"):
             columns = ['mcs', 'prb']
@@ -162,7 +162,6 @@ class BaseEnv(gym.Env):
             dec_times_ko = []
             len_infos = len(infos)
             throughput_ok = []
-            throughput_ko = []
             for info in infos:
                 crc = info['crc']
                 dec_time = info['decoding_time']
@@ -175,10 +174,7 @@ class BaseEnv(gym.Env):
                 else:
                     dec_times_ko.append(dec_time)
 
-                if (crc and dec_time < self.decode_deadline):
-                    throughput_ok.append(tbs)
-                else:
-                    throughput_ko.append(tbs)
+                throughput_ok.append(crc * tbs * (dec_time < self.decode_deadline))
             crc_ok = num_crc_ok / len_infos if len_infos > 0 else -1
             dec_time_ok_ratio = num_dec_time_ok / len_infos if len_infos > 0 else -1
             dec_time_ok_mean = np.mean(dec_times_ok) if len(dec_times_ok) > 0 else -1
@@ -187,8 +183,6 @@ class BaseEnv(gym.Env):
             dec_time_ko_std = np.std(dec_times_ko)   if len(dec_times_ko) > 0 else -1
             throughput_ok_mean = np.mean(throughput_ok) / (1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
             throughput_ok_std = np.std(throughput_ok)   / (1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
-            throughput_ko_mean = np.mean(throughput_ko) / (1024 * 1024) * 1000 if len(throughput_ko) > 0 else -1
-            throughput_ko_std = np.std(throughput_ko)   / (1024 * 1024) * 1000 if len(throughput_ko) > 0 else -1
             return [ { 'period': 1, 'value': np.round(crc_ok, 3) }, 
                      { 'period': 1, 'value': np.round(dec_time_ok_ratio, 3) },
                      { 'period': 1, 'value': int(dec_time_ok_mean)},
@@ -196,9 +190,7 @@ class BaseEnv(gym.Env):
                      { 'period': 1, 'value': int(dec_time_ko_mean)},
                      { 'period': 1, 'value': int(dec_time_ko_std)},
                      { 'period': 1, 'value': np.round(throughput_ok_mean, 3)},
-                     { 'period': 1, 'value': np.round(throughput_ok_std , 3)},
-                     { 'period': 1, 'value': np.round(throughput_ko_mean, 3)},
-                     { 'period': 1, 'value': np.round(throughput_ko_std , 3)}]
+                     { 'period': 1, 'value': np.round(throughput_ok_std , 3)}]
         else: raise Exception("Can't handle policy output format")
 
 

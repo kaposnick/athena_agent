@@ -15,7 +15,7 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.in_scheduling_mode = True
+        self.in_scheduling_mode = False
 
         # validity byte
         # observation is: noise, beta, bsr all are integers32
@@ -37,12 +37,12 @@ class Coordinator():
             nd_array[:] = np.full(shape=(3 * self.total_agents), fill_value=0)
 
         try:
-            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (16) * self.total_agents)
+            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (24) * self.total_agents)
         except Exception:
-            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (16) * self.total_agents)    
+            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (24) * self.total_agents)    
 
-        nd_array = np.ndarray(shape=(4 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
-        nd_array[:] = np.full(shape=(4 * self.total_agents), fill_value=0)                
+        nd_array = np.ndarray(shape=(6 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
+        nd_array[:] = np.full(shape=(6 * self.total_agents), fill_value=0)                
 
         self.config = self.get_environment_config()
         self.processes_started_successfully = mp.Value('i', 0)
@@ -86,7 +86,7 @@ class Coordinator():
             seed = i * 35
             num_episodes = 5500
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/tmp/enb.csv'
+            results_file = '/home/naposto/phd/nokia/enb_high_snr_cpu_v_high_fixed_19.csv'
             load_pretrained_weights = False
             pretrained_weights_path = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'
 
@@ -152,7 +152,7 @@ class Coordinator():
     def rcv_return_func(self):
         shm_reward = shared_memory.SharedMemory(create = False,  name = 'result')
         self.reward_nd_array = np.ndarray(
-            shape=(4 * self.total_agents),
+            shape=(6 * self.total_agents),
             dtype= np.int32,
             buffer = shm_reward.buf
         )
@@ -166,7 +166,7 @@ class Coordinator():
                     is_file_open = True
                     print('Opening receive reward socket...')
                     while (True):
-                        content = file_read.read(16)
+                        content = file_read.read(20)
                         if (len(content) <= 0):
                             print('EOF')
                             break
@@ -174,15 +174,17 @@ class Coordinator():
                         rnti = int.from_bytes(content[2:4], "little")
                         dec_time = int.from_bytes(content[4:8], "little")
                         crc = int.from_bytes(content[8:9], "little")
-                        dec_bits = int.from_bytes(content[12:], "little")
+                        dec_bits = int.from_bytes(content[12:16], "little")
+                        mcs      = int.from_bytes(content[16:18], "little")
+                        prb      = int.from_bytes(content[18:20], "little")
 
-                        result_buffer = [crc, dec_time, dec_bits]
+                        result_buffer = [crc, dec_time, dec_bits, mcs, prb]
                         agent_idx = tti % self.total_agents
                         if (self.verbose == 1):
                             print('Res {} - {}'.format(agent_idx, result_buffer))
                         cond_reward = self.cond_rewards[agent_idx]
                         with cond_reward:
-                            self.reward_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *result_buffer], dtype=np.int32)
+                            self.reward_nd_array[agent_idx * 6: (agent_idx + 1) * 6] = np.array([1, *result_buffer], dtype=np.int32)
                             cond_reward.notify()
             except FileNotFoundError as e:
                 pass

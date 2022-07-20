@@ -122,11 +122,16 @@ class Actor_Critic_Worker(mp.Process):
             tbs_stdv       = info['action_stdv']
             mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
         else:
-            rew_mean = '-1'
-            mcs_mean = '-1'
-            prb_mean = '-1'
             actor_loss = '-1'
             critic_loss = '-1'
+            rew_mean = '-1'
+            entropy   = '-1'
+            actor_nll = '-1'
+            mcs_mean = '-1'
+            prb_mean = '-1'
+            tbs_mean = '-1'
+            tbs_stdv = '-1'
+            mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
         additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
 
         with self.write_to_results_queue_lock:
@@ -146,7 +151,7 @@ class Actor_Critic_Worker(mp.Process):
             for _ in range(self.batch_size):
                 next_state, reward, done, info = self.environment.step(None)
                 self.batch_info.append(info)
-            self.send_results(None, self.batch_info)
+            self.send_results(self.batch_info)
 
     def compute_grads(self, sample_method = 'a2c', add_entropy_term = True):
         if sample_method == 'a2c':

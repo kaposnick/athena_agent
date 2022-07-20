@@ -44,8 +44,8 @@ class SrsRanEnv(BaseEnv):
             self.action_nd_array = action_nd_array[agent_idx * 3: (agent_idx + 1) * 3]
 
         self.shm_reward = shared_memory.SharedMemory(create=False, name='result')
-        result_nd_array = np.ndarray(shape=(4 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
-        self.result_nd_array = result_nd_array[agent_idx * 4: (agent_idx + 1) * 4]
+        result_nd_array = np.ndarray(shape=(6 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
+        self.result_nd_array = result_nd_array[agent_idx * 6: (agent_idx + 1) * 6]
 
         
     def step(self, action):
@@ -77,8 +77,8 @@ class SrsRanEnv(BaseEnv):
                         self.cond_reward.wait(0.1)
             result = self.result_nd_array[1:]
             self.result_nd_array[0] = 0
-            crc, decoding_time, tbs = result
-            result = super().get_agent_result(None, None, None, crc, decoding_time, tbs)
+            crc, decoding_time, tbs, mcs, prb = result
+            result = super().get_agent_result(None, mcs, prb, crc, decoding_time, tbs)
         return result
         
 
