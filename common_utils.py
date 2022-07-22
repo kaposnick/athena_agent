@@ -92,13 +92,16 @@ def get_basic_actor_network(tf, tfp, num_states):
     dense_layer1  = layers.Dense(64, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal()) (state_normalization_layer1)
     dense_layer2  = layers.Dense(64, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal()) (dense_layer1)
     dense_layer3  = layers.Dense(64, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal()) (dense_layer2)
+    dense_layer4  = layers.Dense(256, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal()) (dense_layer3)
+    dense_layer5  = layers.Dense(256, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal()) (dense_layer4)
+    dense_layer6  = layers.Dense(256, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal()) (dense_layer5)
     
-    mu_pre_dense_layer1 = layers.UnitNormalization()(dense_layer3)
+    mu_pre_dense_layer1 = layers.UnitNormalization()(dense_layer6)
     mu_pre_dense_layer2 = layers.Lambda(lambda x: x * multiply_factor)(mu_pre_dense_layer1)
-    mu_layer = layers.Dense(1, activation = 'tanh', kernel_initializer = last_init) (mu_pre_dense_layer2) # [-1..1]
+    mu_layer = layers.Dense(1, activation = 'tanh', kernel_initializer = last_init) (dense_layer6) # [-1..1]
     
     
-    sigma_layer = layers.Dense(1) (mu_pre_dense_layer2)
+    sigma_layer = layers.Dense(1) (dense_layer6)
     
     parameters_layer = layers.Concatenate()([mu_layer, sigma_layer]) # μ, σ    
     probl_layer = tfp.layers.DistributionLambda(
@@ -126,6 +129,9 @@ def get_basic_critic_network(tf, num_states, num_actions):
 
     # concat  = layers.Concatenate()([state_out, action_out])    
     output  = layers.Dense(64, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(state_out)
+    output  = layers.Dense(256, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(output)
+    output  = layers.Dense(256, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(output)
+    output  = layers.Dense(256, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(output)
     output  = layers.Dense(64, activation = 'relu', kernel_initializer = tf.keras.initializers.HeNormal())(output)
     # output_pre_layer = layers.UnitNormalization()(output)
     # output_pre_layer = layers.Lambda(lambda x: x * 2)(output_pre_layer)

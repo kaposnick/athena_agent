@@ -5,6 +5,7 @@ class Config(object):
         self.environment = None
         self.requirements_to_solve_game = None
         self.num_episodes_to_run = None
+        self.num_episodes_inference = None
         self.file_to_save_data_results = None
         self.file_to_save_results_graph = None
         self.runs_per_agent = None

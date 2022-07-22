@@ -9,12 +9,13 @@ import numpy as np
 
 ACTOR_IN = '/tmp/actor_in'
 ACTOR_OUT = '/tmp/actor_out'
+VERIFY_ACTION = '/tmp/verify_action'
 REWARD_IN = '/tmp/return_in'
 
 class Coordinator():
     def __init__(self):
         self.total_agents = 8
-        self.verbose = 1
+        self.verbose = 0
         self.in_scheduling_mode = True
 
         # validity byte
@@ -35,6 +36,14 @@ class Coordinator():
 
             nd_array = np.ndarray(shape=(3 * self.total_agents), dtype=np.int32, buffer=shm_action.buf)
             nd_array[:] = np.full(shape=(3 * self.total_agents), fill_value=0)
+
+            try:
+                shm_verify_action = shared_memory.SharedMemory(create = True,  name = 'verify_action', size = (8) * self.total_agents)
+            except Exception:
+                shm_verify_action = shared_memory.SharedMemory(create = False, name = 'verify_action', size = (8) * self.total_agents)
+
+            nd_array = np.ndarray(shape=(2 * self.total_agents), dtype=np.int32, buffer=shm_verify_action.buf)
+            nd_array[:] = np.full(shape=(2 * self.total_agents), fill_value=0)
 
         try:
             shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (24) * self.total_agents)
@@ -59,6 +68,7 @@ class Coordinator():
         if (self.in_scheduling_mode):
             self.cond_observations = [mp.Condition() for _ in range(self.total_agents)]
             self.cond_actions      = [mp.Condition() for _ in range(self.total_agents)]
+            self.cond_verify_action= [mp.Condition() for _ in range(self.total_agents)]
         self.cond_rewards      = [mp.Condition() for _ in range(self.total_agents)]
 
     def kill_all(self):
@@ -86,7 +96,7 @@ class Coordinator():
             seed = i * 35
             num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/enb_high_snr_cpu_high_agent.csv'
+            results_file = '/home/naposto/phd/nokia/ai_scheduler/user_1_beta_low_variable_snr/results.csv'
             load_pretrained_weights = False
             pretrained_weights_path = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'
 
@@ -101,14 +111,15 @@ class Coordinator():
         config = Config()
         config.seed = seed
         config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 15, input_dims = 2, in_scheduling_mode=self.in_scheduling_mode)
-        config.num_episodes_to_run = num_episodes
+        config.num_episodes_to_run = 3000
+        config.num_episodes_inference = 2000
         config.save_results = True
         config.results_file_path = results_file
         # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_noise_trained_2.csv'
 
-        config.save_weights = False
+        config.save_weights = True
         config.save_weights_period = 1000
-        config.save_weights_file = '/home/naposto/phd/nokia/data/csv_46/real_enb_weights.h5'
+        config.save_weights_file = '/home/naposto/phd/nokia/ai_scheduler/user_1_beta_low_variable_snr/weights'
         
         config.load_initial_weights = load_pretrained_weights
         if (config.load_initial_weights):
@@ -117,12 +128,12 @@ class Coordinator():
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
-                'learning_rate': 1e-3,
+                'learning_rate': 5e-4,
                 'use_state_value_critic': False,
                 'batch_size': 64,
                 'local_update_period': 1,
                 'include_entropy_term': True,
-                'entropy_contribution': 0.0
+                'entropy_contribution': 0.2
             },
         }
 
@@ -140,6 +151,7 @@ class Coordinator():
             if (self.in_scheduling_mode):
                 input['cond_observation'] = self.cond_observations[idx]
                 input['cond_action']      = self.cond_actions[idx]
+                input['cond_verify_action']     = self.cond_verify_action[idx]
             inputs.append(input)
         self.a3c_agent.run_n_episodes(self.processes_started_successfully, inputs)
         if (self.in_scheduling_mode):
@@ -178,13 +190,14 @@ class Coordinator():
                         mcs      = int.from_bytes(content[16:18], "little")
                         prb      = int.from_bytes(content[18:20], "little")
 
-                        result_buffer = [crc, dec_time, dec_bits, mcs, prb]
+                        result_buffer = np.array([tti, crc, dec_time, dec_bits, mcs, prb], dtype = np.int32)
                         agent_idx = tti % self.total_agents
                         if (self.verbose == 1):
                             print('Res {} - {}'.format(agent_idx, result_buffer))
                         cond_reward = self.cond_rewards[agent_idx]
+                        result_buffer[0] = 1
                         with cond_reward:
-                            self.reward_nd_array[agent_idx * 6: (agent_idx + 1) * 6] = np.array([1, *result_buffer], dtype=np.int32)
+                            self.reward_nd_array[agent_idx * 6: (agent_idx + 1) * 6] = result_buffer
                             cond_reward.notify()
             except FileNotFoundError as e:
                 pass
@@ -194,6 +207,7 @@ class Coordinator():
     def rcv_obs_send_act_func(self):
         shm_observation = shared_memory.SharedMemory(create = False,  name = 'observation')
         shm_action = shared_memory.SharedMemory(create = False,  name = 'action')
+        shm_verify_action = shared_memory.SharedMemory(create = False, name = 'verify_action')
 
         self.observation_nd_array = np.ndarray(
             shape=(4 * self.total_agents), 
@@ -207,6 +221,12 @@ class Coordinator():
             buffer = shm_action.buf
         )
 
+        self.verify_action_nd_array = np.ndarray(
+            shape=(2 * self.total_agents),
+            dtype= np.int32,
+            buffer = shm_verify_action.buf
+        )
+
         while (self.processes_started_successfully.value == 0):
             pass
         print('Receive obs thread waiting for all processes to start... OK')
@@ -215,43 +235,63 @@ class Coordinator():
             try:                
                 with open(ACTOR_IN, mode='rb') as file_read:
                     is_actor_in_open = True
-                    with open(ACTOR_OUT,  mode='wb') as file_write:
-                        print('Opening receive state socket...')
-                        while (True):
-                            content = file_read.read(16)
-                            if (len(content) <= 0):
-                                print('EOF')
-                                break
-                            tti  = int.from_bytes(content[0:2], "little")
-                            rnti = int.from_bytes(content[2:4], "little")
-                            bsr =  int.from_bytes(content[4:8], "little")
-                            noise =  int.from_bytes(content[8:12], "little", signed = True)
-                            beta = int.from_bytes(content[12:], "little")
-                            
-                            agent_idx = tti % self.total_agents
-                            observation = [noise, beta, bsr]
-                            if (self.verbose == 1):
-                                print('Obs {} - {}'.format(agent_idx, observation))
-                            cond_observation = self.cond_observations[agent_idx]
-                            cond_action      = self.cond_actions[agent_idx]
-                            with cond_observation:
-                                self.observation_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = np.array([1, *observation], dtype=np.int32)
-                                cond_observation.notify()
+                    is_verify_action_open = False
+                    while (not is_verify_action_open):
+                        try:
+                            with open(VERIFY_ACTION, mode = 'rb') as verify_action_fd:
+                                is_verify_action_open = True
+                                with open(ACTOR_OUT,  mode='wb') as file_write:
+                                    print('Opening receive state socket...')
+                                    while (True):
+                                        content = file_read.read(16)
+                                        if (len(content) <= 0):
+                                            print('EOF')
+                                            break
+                                        tti  = int.from_bytes(content[0:2], "little")
+                                        rnti = int.from_bytes(content[2:4], "little")
+                                        bsr =  int.from_bytes(content[4:8], "little")
+                                        noise =  int.from_bytes(content[8:12], "little", signed = True)
+                                        beta = int.from_bytes(content[12:], "little")
+                                        
+                                        agent_idx = tti % self.total_agents
+                                        observation = np.array([tti, noise, beta, bsr], dtype = np.int32)
+                                        if (self.verbose == 1):
+                                            print('Obs {} - {}'.format(agent_idx, observation))
+                                        cond_observation   = self.cond_observations[agent_idx]
+                                        cond_action        = self.cond_actions[agent_idx]
+                                        cond_verify_action = self.cond_verify_action[agent_idx]
+                                        observation[0] = 1
+                                        with cond_observation:
+                                            self.observation_nd_array[agent_idx * 4: (agent_idx + 1) * 4] = observation
+                                            cond_observation.notify()
 
-                            with cond_action:
-                                while self.action_nd_array[agent_idx * 3]  == 0:
-                                    cond_action.wait(0.1)
+                                        with cond_action:
+                                            while self.action_nd_array[agent_idx * 3]  == 0:
+                                                cond_action.wait(0.001)
 
-                            self.action_nd_array[agent_idx * 3 ] = 0
-                            mcs, prb = self.action_nd_array[agent_idx * 3 + 1].item(), self.action_nd_array[agent_idx * 3 + 2].item()
-                            if (self.verbose == 1):
-                                print('Act {} - {}'.format(agent_idx, [mcs, prb]))
+                                        self.action_nd_array[agent_idx * 3 ] = 0
+                                        mcs, prb = self.action_nd_array[agent_idx * 3 + 1].item(), self.action_nd_array[agent_idx * 3 + 2].item()
+                                        if (self.verbose == 1):
+                                            print('Act {} - {}'.format(agent_idx, [tti, mcs, prb]))
 
-                            action_mcs = mcs.to_bytes(1, byteorder="little")
-                            action_prb = prb.to_bytes(1, byteorder="little")
-                            ext_byte_arr = action_mcs +  action_prb
-                            file_write.write(ext_byte_arr)
-                            file_write.flush()
+                                        action_mcs = mcs.to_bytes(1, byteorder="little")
+                                        action_prb = prb.to_bytes(1, byteorder="little")
+                                        ext_byte_arr = action_mcs +  action_prb
+                                        file_write.write(ext_byte_arr)
+                                        file_write.flush()
+
+                                        verify_action_content = verify_action_fd.read(4)
+                                        if (len(verify_action_content) < 0):
+                                            print('EOF')
+                                            break
+                                        action_verified = int.from_bytes(verify_action_content[0: 4], "little")
+                                        with cond_verify_action:
+                                            self.verify_action_nd_array[agent_idx * 2: (agent_idx + 1) * 2] = np.array([1, action_verified], dtype = np.int32)
+                                            cond_verify_action.notify()
+                        except FileNotFoundError as e:
+                            if (is_actor_in_open and is_verify_action_open):
+                                raise e
+                            pass
             except FileNotFoundError as e:
                 if (is_actor_in_open):
                     raise e

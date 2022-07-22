@@ -13,11 +13,13 @@ class Actor_Critic_Worker(mp.Process):
     def __init__(self, 
                 environment: BaseEnv, config: Config,
                 worker_num: np.int32, total_workers: np.int32, 
-                episodes_to_run: np.int32, state_size, action_size, 
+                state_size, action_size, 
                 successfully_started_worker: mp.Value,
                 sample_buffer_queue: mp.Queue, batch_info_queue: mp.Queue, 
                 optimizer_lock: mp.Lock, 
                 in_scheduling_mode: str,
+                in_training_mode: mp.Value,
+                worker_agent_stop_value = mp.Value,
                 actor_memory_name = 'model_actor',
                 critic_memory_name = 'model_critic') -> None:
         super(Actor_Critic_Worker, self).__init__()
@@ -26,7 +28,6 @@ class Actor_Critic_Worker(mp.Process):
         self.config = config
         self.worker_num = worker_num
         self.total_workers = total_workers
-        self.episodes_to_run = episodes_to_run
         self.state_size = state_size
         self.action_size = action_size
 
@@ -38,6 +39,9 @@ class Actor_Critic_Worker(mp.Process):
         self.in_scheduling_mode = in_scheduling_mode
         self.actor_memory_name = actor_memory_name
         self.critic_memory_name = critic_memory_name
+
+        self.in_training_mode = in_training_mode
+        self.worker_agent_stop_value = worker_agent_stop_value
 
         self.init_configuration()        
 
@@ -132,7 +136,6 @@ class Actor_Critic_Worker(mp.Process):
         additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
 
         with self.write_to_results_queue_lock:
-            self.episode_number.value += 1
             self.results_queue.put([ [self.worker_num, rew_mean, actor_nll, entropy, mcs_mean, prb_mean, tbs_mean, tbs_stdv, actor_loss, critic_loss], additional_columns ])
 
 
@@ -234,10 +237,12 @@ class Actor_Critic_Worker(mp.Process):
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
             
-            for self.ep_ix in range(self.episodes_to_run):
+            self.ep_ix = 0
+            while (True):
+                self.ep_ix += 1
                 if (self.ep_ix % 1 == 0):
-                    self.print('Episode {}/{}'.format(self.ep_ix + 1, self.episodes_to_run))
-                if (self.ep_ix % self.local_update_period == 0):
+                    self.print('Episode {}'.format(self.ep_ix + 1))
+                if (self.in_training_mode.value == 1 and (self.ep_ix % self.local_update_period == 0)):
                     update_weights_time = time.time()
                     self.update_weights()
                     self.print('Updating weights time: {}'.format(time.time() - update_weights_time))
@@ -260,38 +265,40 @@ class Actor_Critic_Worker(mp.Process):
 
                         step_time = time.time()
                         next_state, reward, done, info = self.environment.step([action_idx])
+                        if (reward is None):
+                            self.print('Action not applied.. skipping')
+                            state = next_state
+                            continue
                         self.print('Executing action time: {}'.format(time.time() - step_time))
 
                         real_action_applied = self.convert_to_real_action_applied(info)
+
+                        if (self.in_training_mode.value == 1):                        
+                            self.sample_buffer.append((state, real_action_applied, reward))
                         
-                        self.sample_buffer.append((state, real_action_applied, reward))
                         self.batch_info.append(info)
                         state = next_state
                         batch_idx += 1
 
-                self.sample_buffer_queue.put(self.sample_buffer)
-                self.batch_info_queue.put(self.batch_info)
-
-                # learning_time = time.time()
-                # info = self.learn()    
-                # self.print('Learning time: {}'.format(time.time() - learning_time))
-
-                # self.print('Sending results...')            
-                # sending_results_time = time.time()
-                # self.send_results(info)           
-                # self.print('Sending results time: {}'.format(time.time() - sending_results_time))     
+                if (self.in_training_mode.value == 1):
+                    self.sample_buffer_queue.put(self.sample_buffer)
+                self.batch_info_queue.put(self.batch_info)   
                 
         finally:
-            self.print('Exiting...')
+            print(str(self) + ' -> Exiting...')
 
     def pick_action_from_embedding_table(self, state: np.array):
+        in_training_mode = self.in_training_mode.value
         actor_input = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
         distr = self.actor(actor_input)
 
-        heta_param = np.random.normal(loc = 0, scale = 1)
-        mean = distr.mean()
-        stddev = distr.stddev()
-        action_hat = mean + heta_param * stddev
+        if (in_training_mode):
+            heta_param = np.random.normal(loc = 0, scale = 1)
+            mean = distr.mean()
+            stddev = distr.stddev()
+            action_hat = mean + heta_param * stddev
+        else:
+            action_hat = distr.mean()
         # action_hat = mean
 
         tbs_hat = np.exp(self.coef * action_hat + self.intercept) - 1
@@ -300,11 +307,12 @@ class Actor_Critic_Worker(mp.Process):
 
         action = (np.log(tbs + 1) - self.intercept) / self.coef
         self.print('tbs hat: {} - tbs: {}'.format(tbs_hat, tbs))
-        self.print('action hat: {}/{}/{} - action: {}'.format(mean[0][0].numpy(), stddev[0][0].numpy(), action_hat, action))
+        if (in_training_mode):
+            self.print('action hat: {}/{}/{} - action: {}'.format(mean[0][0].numpy(), stddev[0][0].numpy(), action_hat, action))
         return action_idx, action
 
     def print(self, string_to_print, end = None):
-        if (self.worker_num < 10):
+        if (self.worker_num > 10):
             print(str(self) + ' -> ' + string_to_print, end=end)
 
 

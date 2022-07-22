@@ -67,7 +67,7 @@ class A3CAgent(BaseAgent):
         if (processes_started_successfully is not None):
                 processes_started_successfully.value = 1
         if (self.config.save_results):
-            self.save_results(self.config.results_file_path, self.episode_number, self.results_queue)
+            self.save_results(self.config.results_file_path, self.results_queue)
         for worker in self.worker_processes:
             worker.join()
 
@@ -86,11 +86,13 @@ class A3CAgent(BaseAgent):
         sample_buffer_queue               = mp.Queue()
         batch_info_queue                  = mp.Queue()
         optimizer_lock                    = mp.Lock()
+        self.in_training_mode             = mp.Value('i', 1)
         actor_memory_size_in_bytes        = mp.Value('i', 0)
         critic_memory_size_in_bytes       = mp.Value('i', 0)
         memory_created                    = mp.Value('i', 0)
         master_agent_initialized          = mp.Value('i', 0)
         master_agent_stop                 = mp.Value('i', 0)
+        worker_agent_stop                 = mp.Value('i', 0)
         successfully_started_worker       = mp.Value('i', 0)
 
         self.use_action_value_critic = not self.config.hyperparameters['Actor_Critic_Common']['use_state_value_critic']
@@ -104,7 +106,7 @@ class A3CAgent(BaseAgent):
                 self.results_queue,
                 master_agent_stop,
                 optimizer_lock,
-                self.episode_number,
+                self.in_training_mode,
                 self.actor_memory_name, self.critic_memory_name
             )
         
@@ -136,10 +138,12 @@ class A3CAgent(BaseAgent):
                 worker = Actor_Critic_Worker(
                     worker_environment, self.config, 
                     worker_num, self.num_processes,
-                    self.episodes_per_process, self.state_size, self.action_size,
+                    self.state_size, self.action_size,
                     successfully_started_worker,
                     sample_buffer_queue, batch_info_queue,
-                    optimizer_lock, in_scheduling_mode=True)
+                    optimizer_lock, in_scheduling_mode=True, 
+                    in_training_mode = self.in_training_mode, 
+                    worker_agent_stop_value=worker_agent_stop)
                 worker.start()
                 self.worker_processes.append(worker)
             while (successfully_started_worker.value < self.num_processes):
@@ -148,26 +152,36 @@ class A3CAgent(BaseAgent):
             if (processes_started_successfully is not None):
                 processes_started_successfully.value = 1
             if (self.config.save_results):
-                self.save_results(save_file, self.episode_number, self.results_queue)
-            for worker in self.worker_processes:
-                worker.join()
+                self.save_results(save_file, self.results_queue)
+            
+            # worker_agent_stop.value = 1
+            # for worker in self.worker_processes:
+            #     worker.join()
+
             master_agent_stop.value = 1
             self.optimizer_worker.join()
         finally:
             self.exit_gracefully()
 
 
-    def save_results(self, save_file, episode_number, results_queue):
+    def save_results(self, save_file, results_queue):
         with open(save_file, 'w') as f:
             additional_env_columns = self.environment.get_csv_result_policy_output_columns()
             f.write('|'.join(COLUMNS + additional_env_columns) + '\n')            
             episode = 0
+            has_entered_inference_mode = False
             while True:
-                with episode_number.get_lock():
-                    carry_on = episode_number.value < self.config.num_episodes_to_run
-                    episode = episode_number.value
+                carry_on = True
+                if (episode == self.config.num_episodes_to_run and not has_entered_inference_mode):
+                    self.in_training_mode.value = 0
+                    has_entered_inference_mode = True
+                    print('Going to inference mode')
+                if (episode == self.config.num_episodes_to_run + self.config.num_episodes_inference):
+                    print('Finishing printing results...')
+                    carry_on = False
                 if carry_on:
                     if not results_queue.empty():
+                        episode += 1
                         q_result = results_queue.get()
                         result = [str(x) for x in [episode, *q_result[0]]]
                         for additional_column in q_result[1]:
@@ -182,11 +196,13 @@ class A3CAgent(BaseAgent):
                 else: break
 
     def exit_gracefully(self):
+        print('Killing worker processes...')
         for worker_process in self.worker_processes:
             if (worker_process.is_alive()):
                 worker_process.kill()
                 worker_process.join()
         
+        print('Killing master process')
         if (self.optimizer_worker.is_alive()):
             self.optimizer_worker.kill()
             self.optimizer_worker.join()       

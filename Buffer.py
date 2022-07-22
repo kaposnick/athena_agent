@@ -10,7 +10,7 @@ class EpisodeBuffer:
         self.reward_buffer = np.zeros((self.buffer_capacity, 1))
 
     def reset_episode(self):
-        self.episode_start_index = self.buffer_counter
+        self.episode_start_index = self.buffer_counter % self.buffer_capacity
 
     def record(self, obs_tuple):
         index = self.buffer_counter % self.buffer_capacity
@@ -38,14 +38,14 @@ class EpisodeBuffer:
         valid_indices = np.arange(0, record_range)
 
         if (uniform):
-            batch_indices = np.random.choice(valid_indices, self.batch_size)
+            batch_indices = np.random.choice(valid_indices, 8 * self.batch_size)
         else:
             values  = critic(self.state_buffer[valid_indices], training = False)
             rewards = self.reward_buffer[valid_indices]
-            priorities = np.squeeze(np.maximum(rewards - values, 0))
+            priorities = np.squeeze(np.absolute(rewards - values) ) + 1e-5
             probabilities = priorities / np.sum(priorities)
 
-            batch_indices = np.random.choice(valid_indices, self.batch_size, p = probabilities)
+            batch_indices = np.random.choice(valid_indices, 8 * self.batch_size, p = probabilities)
 
         state_batch = tf.convert_to_tensor(self.state_buffer[batch_indices])
         action_batch = tf.convert_to_tensor(self.action_buffer[batch_indices])
