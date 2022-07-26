@@ -4,7 +4,7 @@ from attr import has
 from BaseAgent import BaseAgent
 from Buffer import EpisodeBuffer
 
-from common_utils import get_basic_actor_network, get_basic_critic_network, get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
 import random
 import numpy as np
 
@@ -19,7 +19,8 @@ class Master_Agent(mp.Process):
                 results_queue: mp.Queue,
                 master_agent_stop: mp.Value,
                 optimizer_lock: mp.Lock,
-                in_training_mode = mp.Value,
+                in_training_mode: mp.Value,
+                scheduling_mode,
                 actor_memory_name = 'model_actor',
                 critic_memory_name = 'model_critic') -> None:
         super(Master_Agent, self).__init__()
@@ -41,6 +42,7 @@ class Master_Agent(mp.Process):
         self.critic_memory_name = critic_memory_name
         self.batch_size = self.config.hyperparameters['Actor_Critic_Common']['batch_size']
         self.in_training_mode = in_training_mode
+        self.scheduling_mode  = scheduling_mode
 
     def __str__(self) -> str:
         return 'Master Agent'
@@ -50,7 +52,8 @@ class Master_Agent(mp.Process):
         os.environ['PYTHONHASHSEED'] = str(self.config.seed)
         random.seed(self.config.seed)
         np.random.seed(self.config.seed)
-        self.tf.random.set_seed(self.config.seed)
+        if (hasattr(self, 'tf')):
+            self.tf.random.set_seed(self.config.seed)
 
     def compute_model_size(self, model):
         model_dtype = np.dtype(model.dtype)
@@ -172,7 +175,7 @@ class Master_Agent(mp.Process):
         actor_loss = critic_loss = '-1'
         rew_mean = entropy = actor_nll = '-1'
         tbs_mean = tbs_stdv = '-1'
-        if (self.in_training_mode.value == 1):
+        if (self.in_training_mode.value == MODE_TRAINING):
             actor_loss     = info['actor_loss']
             critic_loss    = info['critic_loss']
             rew_mean       = info['reward']
@@ -185,7 +188,35 @@ class Master_Agent(mp.Process):
 
         self.results_queue.put([ [rew_mean, actor_nll, entropy, mcs_mean, prb_mean, tbs_mean, tbs_stdv, actor_loss, critic_loss], additional_columns ])
 
-    def run(self):
+    def exeucte_in_schedule_random_mode(self):
+        self.set_process_seeds()
+        self.master_agent_initialized.value = 1
+        import queue
+        filename = self.config.results_file_path
+        with open(filename, 'w') as file:
+            file.write('|'.join(['cpu', 'snr', 'mcs', 'prb', 'crc', 'decoding_time']) + '\n')
+            sample_idx = 0
+            while True:
+                try:
+                    if (self.master_agent_stop.value == 1):
+                        break
+                    sample_buffer = self.sample_buffer_queue.get(block = True, timeout = 10)
+                    for sample in sample_buffer:
+                        state = sample[0] # snr, cpu
+                        action = sample[1] # mcs, prb
+                        reward = sample[2] # crc, time
+                        
+                        record = [str(state[1]), str(state[0]), str(action[0]), str(action[1]), str(reward[0]), str(reward[1])]
+                        file.write('|'.join(record) + '\n')
+                    sample_idx += 1
+                    if (sample_idx == 10):
+                        file.flush()
+                        sample_idx = 0
+                except queue.Empty:
+                    pass
+
+
+    def execute_in_schedule_ac_mode(self):
         self.tf, _, self.tfp = import_tensorflow('3', True)
         self.set_process_seeds()  
         exited_successfully = False
@@ -196,8 +227,10 @@ class Master_Agent(mp.Process):
             self.tf_compute_grads   = self.tf.function(self.compute_grads)
 
             if (self.config.load_initial_weights):
-                print(str(self) + ' -> Loading initial weights from ' + self.config.initial_weights_path)
+                print(str(self) + ' -> Loading actor initial weights from ' + self.config.initial_weights_path)
                 self.actor.load_weights(self.config.initial_weights_path)
+                print(str(self) + ' -> Loading critic initial weights from ' + self.config.critic_initial_weights_path)
+                self.critic.load_weights(self.config.critic_initial_weights_path)
             
             publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)                
             print(str(self) + ' -> Published actor weights to shared memory')
@@ -219,12 +252,11 @@ class Master_Agent(mp.Process):
                 try:
                     if (self.master_agent_stop.value == 1):
                         break
-                    if (not has_entered_inference_mode) and (self.in_training_mode.value == 0):
+                    if (not has_entered_inference_mode) and (self.in_training_mode.value == MODE_TRAINING):
                         has_entered_inference_mode = True
-                        print(str(self) + ' -> Entering inference mode and saving weights...')
-                        self.save_weights('_inference_')
+                        print(str(self) + ' -> Entering inference mode...')
                     while (sample_idx < 1):
-                        if (self.in_training_mode.value == 1):
+                        if (self.in_training_mode.value == MODE_TRAINING):
                             record_list = self.sample_buffer_queue.get(block = True, timeout = 10)
                             for record in record_list:
                                 self.buffer.record(record)
@@ -234,7 +266,7 @@ class Master_Agent(mp.Process):
                         sample_idx += 1
 
                     info = None
-                    if (self.in_training_mode.value == 1):
+                    if (self.in_training_mode.value == MODE_TRAINING):
                         info = self.learn()
                     self.send_results(info)
                     
@@ -242,7 +274,7 @@ class Master_Agent(mp.Process):
                     self.buffer.reset_episode()
                     self.batch_info = []
 
-                    if (self.in_training_mode.value == 1):
+                    if (self.in_training_mode.value == MODE_TRAINING):
                         with self.optimizer_lock:
                             # print(str(self) + ' -> Pushing new weights...')
                             publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)
@@ -258,8 +290,17 @@ class Master_Agent(mp.Process):
         finally:
             print(str(self) + ' -> Exiting ...')
             if (exited_successfully):
-                if (self.config.save_weights):
+                if (self.config.save_weights and self.in_training_mode.value == MODE_TRAINING):
                     self.save_weights('_exiting_')
+
+    def run(self) -> None:
+        if (self.scheduling_mode == MODE_SCHEDULING_AC):
+            self.execute_in_schedule_ac_mode()
+        elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):
+            self.exeucte_in_schedule_random_mode()
+        else: pass
+
+        
         
 
 

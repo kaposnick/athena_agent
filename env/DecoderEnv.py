@@ -1,7 +1,7 @@
 import json
 from tokenize import Number
 import numpy as np
-from env.BaseEnv import NOISE_MIN, NOISE_MAX, BETA_MIN, BETA_MAX, BSR_MIN, BSR_MAX
+from common_utils import NOISE_MIN, NOISE_MAX, BETA_MIN, BETA_MAX, BSR_MIN, BSR_MAX
 
 from common_utils import import_tensorflow
 from env.BaseEnv import BaseEnv
@@ -108,12 +108,12 @@ class DecoderEnv(BaseEnv):
         
     def step(self, action):        
         mcs, prb = super().translate_action(action)
-        observation = self.get_observation() # noise, beta, bsr
-        noise = observation[0]
+        observation = self.get_observation() # snr, beta, bsr
+        snr = observation[0]
         beta  = observation[1]
 
-        # digital twin input: beta, prb, mcs, noise
-        decoder_input_array = np.array([[beta, prb, mcs, noise]], dtype=np.float32)
+        # digital twin input: beta, prb, mcs, snr
+        decoder_input_array = np.array([[beta, prb, mcs, snr]], dtype=np.float32)
         decoder_input = self.tf.convert_to_tensor(decoder_input_array)
 
         # crc, decoding_time = self.decoder_model.predict(decoder_input, batch_size = 1)

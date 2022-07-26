@@ -26,3 +26,4 @@ class Config(object):
         self.save_weights_period = 1e3
         self.load_initial_weights = False
         self.initial_weights_path = None
+        self.critic_initial_weights_path = None

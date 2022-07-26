@@ -1,4 +1,5 @@
 from sys import byteorder
+from common_utils import MODE_INFERENCE, MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM
 from env.SrsRanEnv import SrsRanEnv
 import multiprocessing as mp
 from Config import Config
@@ -16,11 +17,12 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.in_scheduling_mode = True
+        self.scheduling_mode = MODE_SCHEDULING_NO
+        self.training_mode   = MODE_INFERENCE
 
         # validity byte
-        # observation is: noise, beta, bsr all are integers32
-        if (self.in_scheduling_mode):
+        # observation is: snr, beta, bsr all are integers32
+        if (self.in_scheduling_mode()):
             try:
                 shm_observation = shared_memory.SharedMemory(create = True,  name = 'observation', size = (16) * self.total_agents)
             except Exception:
@@ -56,9 +58,14 @@ class Coordinator():
         self.config = self.get_environment_config()
         self.processes_started_successfully = mp.Value('i', 0)
         
-        self.a3c_agent = A3CAgent(self.config, self.total_agents, in_scheduling_mode=self.in_scheduling_mode)
+        self.a3c_agent = A3CAgent(
+            self.config, 
+            self.total_agents, 
+            scheduling_mode=self.scheduling_mode,
+            training_mode=self.training_mode
+        )
 
-        if (self.in_scheduling_mode):
+        if (self.in_scheduling_mode()):
             self.sched_proc = mp.Process(target=self.rcv_obs_send_act_func, name= 'scheduler_intf')
         else:
             self.sched_proc = None
@@ -96,9 +103,11 @@ class Coordinator():
             seed = i * 35
             num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/ai_scheduler/user_1_beta_low_variable_snr/results.csv'
-            load_pretrained_weights = False
-            pretrained_weights_path = '/home/naposto/phd/nokia/agent_models/model_v2/model_weights.h5'
+            results_file = '/home/naposto/phd/nokia/pretraining/cpu_1_test.csv'
+            load_pretrained_weights = True
+            # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
+            actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'            
+            critic_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/v_critic_weights_1user.h5'
 
 
 
@@ -110,21 +119,24 @@ class Coordinator():
 
         config = Config()
         config.seed = seed
-        config.environment = SrsRanEnv(title = 'SRS RAN Environment', verbose=self.verbose, penalty = 15, input_dims = 2, in_scheduling_mode=self.in_scheduling_mode)
-        config.num_episodes_to_run = 3000
-        config.num_episodes_inference = 2000
+        config.environment = SrsRanEnv(
+            title = 'SRS RAN Environment', verbose=self.verbose, penalty = 15, 
+            input_dims = 2, 
+            scheduling_mode=self.scheduling_mode)
+        config.num_episodes_to_run = 0
+        config.num_episodes_inference = 1100
         config.save_results = True
         config.results_file_path = results_file
-        # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_noise_trained_2.csv'
+        # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_snr_trained_2.csv'
 
-        config.save_weights = True
+        config.save_weights = False
         config.save_weights_period = 1000
         config.save_weights_file = '/home/naposto/phd/nokia/ai_scheduler/user_1_beta_low_variable_snr/weights'
         
         config.load_initial_weights = load_pretrained_weights
         if (config.load_initial_weights):
-            config.initial_weights_path = pretrained_weights_path
-            # config.initial_weights_path = '/home/naposto/phd/nokia/data/csv_46/train_all.h5'
+            config.initial_weights_path = actor_pretrained_weights_path
+            config.critic_initial_weights_path = critic_pretrained_weights_path
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
@@ -137,10 +149,13 @@ class Coordinator():
             },
         }
 
-        return config    
+        return config
+
+    def in_scheduling_mode(self):
+        return self.scheduling_mode == MODE_SCHEDULING_AC or self.scheduling_mode == MODE_SCHEDULING_RANDOM
 
     def start(self):
-        if (self.in_scheduling_mode):
+        if (self.in_scheduling_mode()):
             self.sched_proc.start()
         self.decod_proc.start()
         inputs = []
@@ -148,13 +163,13 @@ class Coordinator():
             input = {
                 'cond_reward': self.cond_rewards[idx]
             }
-            if (self.in_scheduling_mode):
+            if (self.in_scheduling_mode()):
                 input['cond_observation'] = self.cond_observations[idx]
                 input['cond_action']      = self.cond_actions[idx]
                 input['cond_verify_action']     = self.cond_verify_action[idx]
             inputs.append(input)
         self.a3c_agent.run_n_episodes(self.processes_started_successfully, inputs)
-        if (self.in_scheduling_mode):
+        if (self.in_scheduling_mode()):
             self.sched_proc.join()
         self.decod_proc.join()
 
@@ -250,11 +265,11 @@ class Coordinator():
                                         tti  = int.from_bytes(content[0:2], "little")
                                         rnti = int.from_bytes(content[2:4], "little")
                                         bsr =  int.from_bytes(content[4:8], "little")
-                                        noise =  int.from_bytes(content[8:12], "little", signed = True)
+                                        snr =  int.from_bytes(content[8:12], "little", signed = True)
                                         beta = int.from_bytes(content[12:], "little")
                                         
                                         agent_idx = tti % self.total_agents
-                                        observation = np.array([tti, noise, beta, bsr], dtype = np.int32)
+                                        observation = np.array([tti, beta, snr, bsr], dtype = np.int32)
                                         if (self.verbose == 1):
                                             print('Obs {} - {}'.format(agent_idx, observation))
                                         cond_observation   = self.cond_observations[agent_idx]

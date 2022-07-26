@@ -4,7 +4,7 @@ import random
 from OUActionNoise import OUActionNoise
 from Buffer import EpisodeBuffer
 from env.BaseEnv import BaseEnv
-from common_utils import get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state
 from Config import Config
 import time
 import copy
@@ -17,7 +17,7 @@ class Actor_Critic_Worker(mp.Process):
                 successfully_started_worker: mp.Value,
                 sample_buffer_queue: mp.Queue, batch_info_queue: mp.Queue, 
                 optimizer_lock: mp.Lock, 
-                in_scheduling_mode: str,
+                scheduling_mode: str,
                 in_training_mode: mp.Value,
                 worker_agent_stop_value = mp.Value,
                 actor_memory_name = 'model_actor',
@@ -36,7 +36,7 @@ class Actor_Critic_Worker(mp.Process):
         self.optimizer_lock = optimizer_lock
         self.sample_buffer_queue = sample_buffer_queue
         self.batch_info_queue = batch_info_queue
-        self.in_scheduling_mode = in_scheduling_mode
+        self.scheduling_mode = scheduling_mode
         self.actor_memory_name = actor_memory_name
         self.critic_memory_name = critic_memory_name
 
@@ -60,7 +60,8 @@ class Actor_Critic_Worker(mp.Process):
         os.environ['PYTHONHASHSEED'] = str(self.config.seed + worker_num)
         random.seed(self.config.seed + worker_num)
         np.random.seed(self.config.seed + worker_num)
-        self.tf.random.set_seed(self.config.seed + worker_num)
+        if (hasattr(self, 'tf')):
+            self.tf.random.set_seed(self.config.seed + worker_num)
 
     def get_shared_memory_reference(self, model, memory_name):
         ## return the reference to the memory and the np.array pointing to the shared memory
@@ -93,10 +94,6 @@ class Actor_Critic_Worker(mp.Process):
             raise e
 
     def initiate_worker_variables(self):
-        std_dev = 0.2
-        self.ou_noise = OUActionNoise(mean=np.zeros(1), std_deviation=float(std_dev) * np.ones(1))
-        self.k = 1
-        self.buffer = EpisodeBuffer(3000, self.batch_size, self.state_size, 1)
         self.coef = 5.159817058590249
         self.intercept = 7.6586417701293446
 
@@ -106,38 +103,29 @@ class Actor_Critic_Worker(mp.Process):
             self.actor.set_weights(copy.deepcopy(self.weights_actor))            
             self.critic.set_weights(copy.deepcopy(self.weights_critic))
 
-    def send_gradients(self, tape, actor_loss, critic_loss):
-        gradients = [tape.gradient(actor_loss, self.actor.trainable_weights)]        
-        gradients.append(tape.gradient(critic_loss, self.critic.trainable_weights))
-        self.gradient_updates_queue.put(gradients)
-        return gradients
 
     def send_results(self, info):
-        if (self.in_scheduling_mode):
-            actor_loss     = info['actor_loss']
-            critic_loss    = info['critic_loss']
-            rew_mean       = info['reward']
-            entropy        = info['entropy']
-            actor_nll      = info['actor_nll']
-            tbs_mean       = info['action_mean']
-            tbs_stdv       = info['action_stdv']
-            mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
-        else:
-            actor_loss = '-1'
-            critic_loss = '-1'
-            rew_mean = '-1'
-            entropy   = '-1'
-            actor_nll = '-1'
-            mcs_mean = '-1'
-            prb_mean = '-1'
-            tbs_mean = '-1'
-            tbs_stdv = '-1'
-            mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
+        actor_loss = '-1'
+        critic_loss = '-1'
+        rew_mean = '-1'
+        entropy   = '-1'
+        actor_nll = '-1'
+        mcs_mean = '-1'
+        prb_mean = '-1'
+        tbs_mean = '-1'
+        tbs_stdv = '-1'
+        mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
         additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
 
         with self.write_to_results_queue_lock:
             self.results_queue.put([ [self.worker_num, rew_mean, actor_nll, entropy, mcs_mean, prb_mean, tbs_mean, tbs_stdv, actor_loss, critic_loss], additional_columns ])
 
+    def convert_to_real_action_applied(self, info):
+        mcs = int(info['mcs'])
+        prb = int(info['prb'])
+        tbs = self.environment.to_tbs(mcs, prb)
+        return tbs
+        return (np.log(tbs + 1) - self.intercept) / self.coef
 
     def run_in_collecting_stats_mode(self):
         self.environment.setup(self.worker_num, self.total_workers)
@@ -153,86 +141,44 @@ class Actor_Critic_Worker(mp.Process):
                 self.batch_info.append(info)
             self.send_results(self.batch_info)
 
-    def compute_grads(self, state_batch, action_batch, reward_batch, add_entropy_term = True):            
-        info = {}
-        with self.tf.GradientTape() as tape1, self.tf.GradientTape() as tape2:
-            distr_batch    =  self.actor(state_batch, training = True)
-            critic_batch   = self.critic(state_batch, training = True)
-            advantage = reward_batch - critic_batch
-            
-            nll = distr_batch.log_prob(action_batch)
-            actor_advantage_nll = nll * advantage
-            actor_loss = actor_advantage_nll
-
-            if (add_entropy_term and self.include_entropy_term):
-                entropy = distr_batch.entropy()
-                info['entropy']  = self.tf.math.reduce_mean(entropy)
-                actor_loss -= self.entropy_contribution * entropy
-                        
-            actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
-            critic_loss = 0.5 * self.tf.math.reduce_mean(self.tf.math.square(advantage))
-            info['actor_loss'] = self.tf.math.reduce_mean(actor_loss)
-            info['critic_loss'] = self.tf.math.reduce_mean(critic_loss)
-            info['reward'] = self.tf.math.reduce_mean(reward_batch)
-            info['actor_nll'] = self.tf.math.reduce_mean(actor_advantage_nll)
-            info['action_mean'] = self.tf.math.reduce_mean(distr_batch.mean())
-            info['action_stddev'] = self.tf.math.reduce_mean(distr_batch.stddev())
-        
-        actor_grads  = tape1.gradient(actor_loss, self.actor.trainable_weights)
-        critic_grads = tape2.gradient(critic_loss, self.critic.trainable_weights)
-
-        return actor_grads, critic_grads, info        
-        
-
-    def compute_sil_grads(self):
-        state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
-        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = False)
-
-    def compute_a2c_grads(self):
-        state_batch, action_batch, reward_batch = self.buffer.sample_sil(self.tf, self.critic)
-        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = True)
+    def execute_in_schedule_random_mode(self):
+        self.set_process_seeds(self.worker_num)
+        try:
+            self.environment.setup(self.worker_num, self.total_workers)        
+            with self.successfully_started_worker.get_lock():
+                self.successfully_started_worker.value += 1
+            ep_ix = 0
+            while (True):
+                ep_ix += 1
+                if (ep_ix % 1 == 0):
+                    self.print('Episode {}'.format(ep_ix + 1))
+                batch_idx = 0
+                sample_buffer = []
+                while batch_idx < self.batch_size:
+                    state = self.environment.reset()
+                    next_state, reward, done, info = self.environment.step('random')
+                    if (reward is None):
+                        continue
+                    action = np.array([info['mcs'], info['prb']])
+                    reward = np.array([info['crc'], info['decoding_time']])
+                    sample = (state, action, reward)
+                    sample_buffer.append(sample)
+                    batch_idx += 1
+                self.sample_buffer_queue.put(sample_buffer)
+        finally:
+            print(str(self) + ' -> Exiting...')
 
 
-    def learn(self):
-        a2c_actor_grads, a2c_critic_grads, a2c_info = self.compute_a2c_grads()
-        sil_actor_grads, sil_critic_grads, sil_info = self.compute_sil_grads()
-
-        gradients = [a2c_actor_grads, a2c_critic_grads, sil_actor_grads, sil_critic_grads]
-        self.gradient_updates_queue.put(gradients)
-        info = {
-            'actor_loss' : a2c_info['actor_loss'].numpy(),
-            'critic_loss': a2c_info['critic_loss'].numpy(),
-            'reward'     : a2c_info['reward'].numpy(),
-            'entropy'    : a2c_info['entropy'].numpy(),
-            'actor_nll'  : a2c_info['actor_nll'].numpy(),
-            'action_mean': a2c_info['action_mean'].numpy(),
-            'action_stdv': a2c_info['action_stddev'].numpy(),
-            'sil_actor_loss' : sil_info['actor_loss'].numpy(),
-            'sil_critic_loss': sil_info['critic_loss'].numpy(),
-            'sil_reward'     : sil_info['reward'].numpy(),
-            'sil_actor_nll'  : sil_info['actor_nll'].numpy(),
-            'sil_action_mean': sil_info['action_mean'].numpy(),
-            'sil_action_stdv': sil_info['action_stddev'].numpy()
-        }
-        return info
-
-    def convert_to_real_action_applied(self, info):
-        mcs = int(info['mcs'])
-        prb = int(info['prb'])
-        tbs = self.environment.to_tbs(mcs, prb)
-        return (np.log(tbs + 1) - self.intercept) / self.coef
-
-    def run(self) -> None:
-        if (not self.in_scheduling_mode):
-            self.run_in_collecting_stats_mode()
-            return
+    def execute_in_schedule_ac_mode(self):
         self.tf, _, self.tfp = import_tensorflow('3', True)
         self.set_process_seeds(self.worker_num)        
         self.initiate_worker_variables()        
         try:
             self.initiate_models()
             self.environment.setup(self.worker_num, self.total_workers)
-            self.tf_compute_grads = self.tf.function(self.compute_grads)
+
+            self.update_weights()
+            self.print('Getting initial weights weights time')
             
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
@@ -242,7 +188,7 @@ class Actor_Critic_Worker(mp.Process):
                 self.ep_ix += 1
                 if (self.ep_ix % 1 == 0):
                     self.print('Episode {}'.format(self.ep_ix + 1))
-                if (self.in_training_mode.value == 1 and (self.ep_ix % self.local_update_period == 0)):
+                if (self.in_training_mode.value == MODE_TRAINING and (self.ep_ix % self.local_update_period == 0)):
                     update_weights_time = time.time()
                     self.update_weights()
                     self.print('Updating weights time: {}'.format(time.time() - update_weights_time))
@@ -273,46 +219,55 @@ class Actor_Critic_Worker(mp.Process):
 
                         real_action_applied = self.convert_to_real_action_applied(info)
 
-                        if (self.in_training_mode.value == 1):                        
+                        if (self.in_training_mode.value == MODE_TRAINING):                        
                             self.sample_buffer.append((state, real_action_applied, reward))
                         
                         self.batch_info.append(info)
                         state = next_state
                         batch_idx += 1
 
-                if (self.in_training_mode.value == 1):
+                if (self.in_training_mode.value == MODE_TRAINING):
                     self.sample_buffer_queue.put(self.sample_buffer)
                 self.batch_info_queue.put(self.batch_info)   
                 
         finally:
             print(str(self) + ' -> Exiting...')
 
+
+    def run(self) -> None:
+        if (self.scheduling_mode == MODE_SCHEDULING_NO):
+            self.run_in_collecting_stats_mode()
+        elif (self.scheduling_mode == MODE_SCHEDULING_AC):
+            self.execute_in_schedule_ac_mode()
+        elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):
+            self.execute_in_schedule_random_mode()
+
     def pick_action_from_embedding_table(self, state: np.array):
-        in_training_mode = self.in_training_mode.value
+        in_training_mode = self.in_training_mode.value == MODE_TRAINING
+        normalize_state(state)
+        self.print('{}'.format(state))
         actor_input = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
-        distr = self.actor(actor_input)
+        mu, sigma = self.actor(actor_input)[0]
 
         if (in_training_mode):
             heta_param = np.random.normal(loc = 0, scale = 1)
-            mean = distr.mean()
-            stddev = distr.stddev()
-            action_hat = mean + heta_param * stddev
+            action_hat = mu + heta_param * sigma
         else:
-            action_hat = distr.mean()
+            action_hat = mu
         # action_hat = mean
 
-        tbs_hat = np.exp(self.coef * action_hat + self.intercept) - 1
+        tbs_hat = action_hat
         
         action_idx, tbs = self.environment.get_closest_actions(tbs_hat)
 
-        action = (np.log(tbs + 1) - self.intercept) / self.coef
+        action = tbs
         self.print('tbs hat: {} - tbs: {}'.format(tbs_hat, tbs))
         if (in_training_mode):
-            self.print('action hat: {}/{}/{} - action: {}'.format(mean[0][0].numpy(), stddev[0][0].numpy(), action_hat, action))
+            self.print('action hat: {}/{}/{} - action: {}'.format(mu[0].numpy(), sigma[0].numpy(), action_hat, action))
         return action_idx, action
 
     def print(self, string_to_print, end = None):
-        if (self.worker_num > 10):
+        if (self.worker_num == 2):
             print(str(self) + ' -> ' + string_to_print, end=end)
 
 

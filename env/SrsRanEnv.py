@@ -1,6 +1,7 @@
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import numpy as np
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM
 
 from env.DecoderEnv import BaseEnv
 
@@ -11,18 +12,18 @@ class SrsRanEnv(BaseEnv):
                 policy_output_format = "mcs_prb_joint",
                 title = "srsRAN Environment",
                 verbose = 0,
-                in_scheduling_mode = True) -> None:
+                scheduling_mode = MODE_SCHEDULING_AC) -> None:
         super(SrsRanEnv, self).__init__(
             input_dims = input_dims,
             penalty = penalty,
             policy_output_format = policy_output_format,
             title = title, 
             verbose = verbose, 
-            in_scheduling_mode = in_scheduling_mode)
+            scheduling_mode = scheduling_mode)
              
 
     def presetup(self, inputs):
-        if (self.in_scheduling_mode):
+        if (self.scheduling_mode):
             cond_observation = inputs['cond_observation']
             self.cond_observation = cond_observation
             
@@ -37,7 +38,7 @@ class SrsRanEnv(BaseEnv):
 
     def setup(self, agent_idx, total_agents):
         super().setup(agent_idx, total_agents)
-        if (self.in_scheduling_mode):
+        if (self.scheduling_mode):
             self.shm_observation = shared_memory.SharedMemory(create=False, name='observation')
             observation_nd_array = np.ndarray(shape=(4 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
             self.observation_nd_array = observation_nd_array[agent_idx * 4: (agent_idx+1)*4]
@@ -56,7 +57,7 @@ class SrsRanEnv(BaseEnv):
 
         
     def step(self, action):
-        if (self.in_scheduling_mode):
+        if (self.scheduling_mode == MODE_SCHEDULING_AC or self.scheduling_mode == MODE_SCHEDULING_RANDOM):
             mcs, prb = super().translate_action(action)
             with self.cond_action:
                 self.action_nd_array[:] = np.array([1, mcs, prb], dtype=np.int32)
@@ -105,7 +106,8 @@ class SrsRanEnv(BaseEnv):
             while self.observation_nd_array[0] == 0:
                 self.cond_observation.wait(0.001)
         self.observation_nd_array[0] = 0
-        super().set_observation(self.observation_nd_array[1:][:self.input_dims].tolist())
+        state = self.observation_nd_array[1:][:self.input_dims].astype(np.float32)
+        super().set_observation(state)
         if (self.verbose == 1):
             print('{} - Obs: {}'.format(str(self), self.observation))
         return super().get_observation()

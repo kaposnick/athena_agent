@@ -6,7 +6,7 @@ import numpy as np
 
 import time
 
-from env.DecoderEnv import BETA_MAX, BETA_MIN, BSR_MAX, BSR_MIN, NOISE_MAX, NOISE_MIN
+from common_utils import BETA_MAX, BETA_MIN, BSR_MAX, BSR_MIN, NOISE_MAX, NOISE_MIN
 
 class BaseAgent(object):
     def __init__(self, config) -> None:

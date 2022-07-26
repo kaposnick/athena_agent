@@ -3,12 +3,7 @@ import numpy as np
 import gym
 from gym import spaces
 
-NOISE_MIN = -15.0
-NOISE_MAX = 100.0
-BETA_MIN  = 1.0
-BETA_MAX  = 1000.0
-BSR_MIN   = 0
-BSR_MAX   = 180e3
+from common_utils import MODE_SCHEDULING_AC
 
 PROHIBITED_COMBOS = [(0, 0), (0, 1), (0,2), (0, 3), 
                   (1, 0), (1, 1), (1, 2),
@@ -35,14 +30,14 @@ class BaseEnv(gym.Env):
                 title: str, 
                 verbose: Number,
                 decode_deadline = 3000, 
-                in_scheduling_mode = True) -> None:
+                scheduling_mode = MODE_SCHEDULING_AC) -> None:
         super(BaseEnv, self).__init__()
         self.min_penalty = penalty
         self.policy_output_format = policy_output_format
         self.title = title
         self.verbose = verbose
         self.decode_deadline = decode_deadline
-        self.in_scheduling_mode = in_scheduling_mode
+        self.scheduling_mode = scheduling_mode
         self.input_dims = input_dims
         self.observation_shape = (input_dims, )
         self.observation_space = spaces.Box(
@@ -295,7 +290,10 @@ class BaseEnv(gym.Env):
         
 
     def translate_action(self, action) -> tuple:
-        return self.fn_action_translation(action)
+        if (action == 'random'):
+            mcs, prb = self.action_array[np.random.randint(0, len(self.action_array))]
+            return int(mcs), int(prb)
+        else: return self.fn_action_translation(action)
 
     def calculate_mean(self, probs, info) -> tuple:
         return self.fn_calculate_mean(probs, info)
