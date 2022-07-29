@@ -17,7 +17,7 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.scheduling_mode = MODE_SCHEDULING_NO
+        self.scheduling_mode = MODE_SCHEDULING_AC
         self.training_mode   = MODE_INFERENCE
 
         # validity byte
@@ -103,7 +103,7 @@ class Coordinator():
             seed = i * 35
             num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/pretraining/cpu_1_test.csv'
+            results_file = '/home/naposto/phd/nokia/infocom/datasets/own_scheduler/tbs_entropy_5/minus_one_sigma/cpu_800_test.csv'
             load_pretrained_weights = True
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
             actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'            
@@ -124,7 +124,7 @@ class Coordinator():
             input_dims = 2, 
             scheduling_mode=self.scheduling_mode)
         config.num_episodes_to_run = 0
-        config.num_episodes_inference = 1100
+        config.num_episodes_inference = 20000
         config.save_results = True
         config.results_file_path = results_file
         # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_snr_trained_2.csv'

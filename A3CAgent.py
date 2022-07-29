@@ -46,7 +46,28 @@ class A3CAgent(BaseAgent):
         return shm
 
     def run_in_collect_stats_mode(self, processes_started_successfully = None, inputs = None):
-        successfully_started_worker = mp.Value('i', 0)
+        batch_info_queue                  = mp.Queue()
+        sample_buffer_queue = mp.Queue()
+        master_agent_initialized = mp.Value('i', 0)
+        master_agent_stop = mp.Value('i', 0)
+        worker_agent_initialized = mp.Value('i', 0)
+        worker_agent_stop = mp.Value('i', 0)
+        master_agent = Master_Agent(
+            self.environment,
+            self.hyperparameters, self.config, self.state_size, self.action_size,
+            None, None, None,
+            master_agent_initialized=master_agent_initialized,
+            sample_buffer_queue=sample_buffer_queue,
+            batch_info_queue=batch_info_queue,
+            results_queue=self.results_queue,
+            master_agent_stop=master_agent_stop,
+            optimizer_lock=None,
+            in_training_mode=None,
+            scheduling_mode=self.scheduling_mode
+        )
+        master_agent.start()
+        while (master_agent_initialized.value == 0):
+                pass
         for worker_num in range(self.num_processes):
             import copy
             worker_environment = copy.deepcopy(self.environment)
@@ -55,15 +76,16 @@ class A3CAgent(BaseAgent):
             worker = Actor_Critic_Worker(
                 worker_environment, self.config, 
                 worker_num, self.num_processes,
-                None, None,
-                successfully_started_worker,
-                None, self.write_to_results_queue_lock,
-                self.results_queue, None,
-                self.episode_number, 
-                scheduling_mode=False)
+                state_size = self.state_size, action_size = self.action_size,
+                successfully_started_worker=worker_agent_initialized,
+                sample_buffer_queue = sample_buffer_queue, 
+                batch_info_queue = batch_info_queue, optimizer_lock=None,
+                scheduling_mode=self.scheduling_mode, 
+                in_training_mode =None, 
+                worker_agent_stop_value=worker_agent_stop)
             worker.start()
             self.worker_processes.append(worker)
-        while (successfully_started_worker.value < self.num_processes):
+        while (worker_agent_initialized.value < self.num_processes):
             pass
         if (processes_started_successfully is not None):
                 processes_started_successfully.value = 1
@@ -232,7 +254,8 @@ class A3CAgent(BaseAgent):
             while True:
                 carry_on = True
                 if (episode == self.config.num_episodes_to_run and not has_entered_inference_mode):
-                    self.in_training_mode.value = MODE_INFERENCE
+                    if hasattr(self, 'in_training_mode'):
+                        self.in_training_mode.value = MODE_INFERENCE
                     has_entered_inference_mode = True
                     print('Going to inference mode')
                 if (episode == self.config.num_episodes_to_run + self.config.num_episodes_inference):

@@ -132,14 +132,31 @@ class Actor_Critic_Worker(mp.Process):
         with self.successfully_started_worker.get_lock():
             self.successfully_started_worker.value += 1
         
-        for self.ep_ix in range(self.episodes_to_run):
+        
+        self.ep_ix = 0
+        while (True):
+            self.ep_ix += 1
+
             self.batch_info = []
-            if (self.ep_ix % 1 == 0):
-                self.print('Episode {}/{}'.format(self.ep_ix + 1, self.episodes_to_run))
-            for _ in range(self.batch_size):
+            batch_idx = 0
+            while batch_idx < self.batch_size:
                 next_state, reward, done, info = self.environment.step(None)
+                if (reward is None):
+                    state = next_state
+                    continue
                 self.batch_info.append(info)
-            self.send_results(self.batch_info)
+                state = next_state
+                batch_idx += 1
+            self.batch_info_queue.put(self.batch_info)
+
+        # for self.ep_ix in range(self.episodes_to_run):
+        #     self.batch_info = []
+        #     if (self.ep_ix % 1 == 0):
+        #         self.print('Episode {}/{}'.format(self.ep_ix + 1, self.episodes_to_run))
+        #     for _ in range(self.batch_size):
+        #         next_state, reward, done, info = self.environment.step(None)
+        #         self.batch_info.append(info)
+        #     self.send_results(self.batch_info)
 
     def execute_in_schedule_random_mode(self):
         self.set_process_seeds(self.worker_num)
@@ -206,7 +223,7 @@ class Actor_Critic_Worker(mp.Process):
                     done = False
                     while not done:
                         pick_action_time = time.time()
-                        action_idx, action = self.pick_action_from_embedding_table(state)
+                        action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
                         self.print('Pick action time: {}'.format(time.time() - pick_action_time))
 
                         step_time = time.time()
@@ -218,6 +235,8 @@ class Actor_Critic_Worker(mp.Process):
                         self.print('Executing action time: {}'.format(time.time() - step_time))
 
                         real_action_applied = self.convert_to_real_action_applied(info)
+                        info['mu'] = mu
+                        info['sigma'] = sigma
 
                         if (self.in_training_mode.value == MODE_TRAINING):                        
                             self.sample_buffer.append((state, real_action_applied, reward))
@@ -253,6 +272,7 @@ class Actor_Critic_Worker(mp.Process):
             heta_param = np.random.normal(loc = 0, scale = 1)
             action_hat = mu + heta_param * sigma
         else:
+            heta_param = np.random.normal(loc = 0, scale = 1)
             action_hat = mu
         # action_hat = mean
 
@@ -264,7 +284,7 @@ class Actor_Critic_Worker(mp.Process):
         self.print('tbs hat: {} - tbs: {}'.format(tbs_hat, tbs))
         if (in_training_mode):
             self.print('action hat: {}/{}/{} - action: {}'.format(mu[0].numpy(), sigma[0].numpy(), action_hat, action))
-        return action_idx, action
+        return action_idx, action, mu.numpy(), sigma.numpy()
 
     def print(self, string_to_print, end = None):
         if (self.worker_num == 2):

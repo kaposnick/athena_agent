@@ -97,7 +97,7 @@ class SrsRanEnv(BaseEnv):
             result = self.result_nd_array[1:]
             self.result_nd_array[0] = 0
             crc, decoding_time, tbs, mcs, prb = result
-            result = super().get_agent_result(None, mcs, prb, crc, decoding_time, tbs)
+            result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs)
         return result
         
 

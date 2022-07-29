@@ -175,7 +175,7 @@ class Master_Agent(mp.Process):
         actor_loss = critic_loss = '-1'
         rew_mean = entropy = actor_nll = '-1'
         tbs_mean = tbs_stdv = '-1'
-        if (self.in_training_mode.value == MODE_TRAINING):
+        if ((self.in_training_mode is not None) and (self.in_training_mode.value == MODE_TRAINING)):
             actor_loss     = info['actor_loss']
             critic_loss    = info['critic_loss']
             rew_mean       = info['reward']
@@ -187,6 +187,34 @@ class Master_Agent(mp.Process):
         additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
 
         self.results_queue.put([ [rew_mean, actor_nll, entropy, mcs_mean, prb_mean, tbs_mean, tbs_stdv, actor_loss, critic_loss], additional_columns ])
+
+    def run_in_collecting_stats_mode(self):
+        self.set_process_seeds()
+        sample_idx = 0
+        self.batch_info = []
+        try:
+            self.master_agent_initialized.value = 1
+            while True:
+                import queue
+                try:
+                    if (self.master_agent_stop.value == 1):
+                        break
+                    while (sample_idx < 1):
+                        info_list = self.batch_info_queue.get()
+                        for info in info_list:
+                            self.batch_info.append(info)
+                        sample_idx += 1
+                    self.send_results(info)
+                    sample_idx = 0
+                    self.batch_info = []
+                except queue.Empty:
+                    if (self.master_agent_stop.value == 1):
+                        exited_successfully = True
+                        break
+            pass
+        finally:
+            print(str(self) + ' -> Exiting ...')
+
 
     def exeucte_in_schedule_random_mode(self):
         self.set_process_seeds()
@@ -298,7 +326,8 @@ class Master_Agent(mp.Process):
             self.execute_in_schedule_ac_mode()
         elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):
             self.exeucte_in_schedule_random_mode()
-        else: pass
+        else: 
+            self.run_in_collecting_stats_mode()
 
         
         

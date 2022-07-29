@@ -164,7 +164,7 @@ class BaseEnv(gym.Env):
 
     def get_csv_result_policy_output_columns(self) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):
-            columns = ['crc_ok', 
+            columns = ['mu_mean', 'sigma_mean', 'crc_ok', 
                     'dec_time_ok_ratio', 'dec_time_ok_mean', 'dec_time_ok_std', 'dec_time_ko_mean', 'dec_time_ko_std', 
                     'throughput_ok_mean', 'throughput_ok_std']
             return columns
@@ -181,6 +181,8 @@ class BaseEnv(gym.Env):
             dec_times_ko = []
             len_infos = len(infos)
             throughput_ok = []
+            mu = []
+            sigma = []
             for info in infos:
                 crc = info['crc']
                 dec_time = info['decoding_time']
@@ -194,6 +196,10 @@ class BaseEnv(gym.Env):
                     dec_times_ko.append(dec_time)
 
                 throughput_ok.append(crc * tbs * (dec_time < self.decode_deadline))
+                mu.append(info['mu'])
+                sigma.append(info['sigma'])
+            mu_mean = np.mean(mu) if len_infos > 0 else -1
+            sigma_mean = np.mean(sigma) if len_infos > 0 else -1
             crc_ok = num_crc_ok / len_infos if len_infos > 0 else -1
             dec_time_ok_ratio = num_dec_time_ok / len_infos if len_infos > 0 else -1
             dec_time_ok_mean = np.mean(dec_times_ok) if len(dec_times_ok) > 0 else -1
@@ -202,7 +208,9 @@ class BaseEnv(gym.Env):
             dec_time_ko_std = np.std(dec_times_ko)   if len(dec_times_ko) > 0 else -1
             throughput_ok_mean = np.mean(throughput_ok) / (1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
             throughput_ok_std = np.std(throughput_ok)   / (1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
-            return [ { 'period': 1, 'value': np.round(crc_ok, 3) }, 
+            return [ { 'period': 1, 'value': int(mu_mean) },
+                     { 'period': 1, 'value': int(sigma_mean) },
+                     { 'period': 1, 'value': np.round(crc_ok, 3) }, 
                      { 'period': 1, 'value': np.round(dec_time_ok_ratio, 3) },
                      { 'period': 1, 'value': int(dec_time_ok_mean)},
                      { 'period': 1, 'value': int(dec_time_ok_std)},
