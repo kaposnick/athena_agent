@@ -20,9 +20,7 @@ COL_DT_REWARD_MEAN = 'reward_mean'
 COL_DT_SIM = 'sim'
 
 COLUMNS = [
-    COL_DT_REP, COL_DT_SIM,
-    COL_DT_REWARD_MEAN, 'actor_nll', COL_DT_ENTROPY_MEAN, COL_DT_MCS_MEAN, COL_DT_PRB_MEAN, 'tbs_mean', 'tbs_stdv', COL_DT_AC_LOSS_MEAN, COL_DT_CR_LOSS_MEAN
-]
+    COL_DT_REP, COL_DT_MCS_MEAN, COL_DT_PRB_MEAN ]
 
 class A3CAgent(BaseAgent):
     def __init__(self, config, num_processes, scheduling_mode = MODE_SCHEDULING_AC, training_mode = MODE_TRAINING) -> None:

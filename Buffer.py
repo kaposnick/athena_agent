@@ -38,14 +38,17 @@ class EpisodeBuffer:
         valid_indices = np.arange(0, record_range)
 
         if (uniform):
-            batch_indices = np.random.choice(valid_indices, 8 * self.batch_size)
+            batch_indices = np.random.choice(valid_indices, self.batch_size)
         else:
             values  = critic(self.state_buffer[valid_indices], training = False)
             rewards = self.reward_buffer[valid_indices]
-            priorities = np.squeeze(np.absolute(rewards - values) ) + 1e-5
-            probabilities = priorities / np.sum(priorities)
+            inner_term = np.squeeze(rewards - values)
+            valid_indices = np.where(inner_term > 0)
+            batch_indices = np.random.choice(valid_indices[0], self.batch_size)
 
-            batch_indices = np.random.choice(valid_indices, 8 * self.batch_size, p = probabilities)
+            # priorities = np.squeeze(np.maximum(rewards - values),0) + 1e-5
+            # probabilities = priorities / np.sum(priorities)
+            # batch_indices = np.random.choice(valid_indices, 8 * self.batch_size, p = probabilities)
 
         state_batch = tf.convert_to_tensor(self.state_buffer[batch_indices])
         action_batch = tf.convert_to_tensor(self.action_buffer[batch_indices])

@@ -94,15 +94,15 @@ def get_basic_actor_network(tf, tfp, num_states):
     layers = keras.layers
 
     state_input = keras.Input(shape = (num_states))
-    x = layers.Dense(64, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (state_input)
-    x = layers.Dense(64, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(64, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(64, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(64, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    norm_params = layers.Dense(2)(x)
+    x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (state_input)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    initial_bias = np.array([13500.0, 4500.0])
+    output_bias = tf.constant_initializer(initial_bias)
+    norm_params = layers.Dense(2, bias_initializer = output_bias)(x)
     actor = keras.Model(state_input, norm_params)
     return actor
 
@@ -111,12 +111,8 @@ def get_basic_critic_network(tf, num_states, num_actions):
     layers = keras.layers
     state_input = keras.Input(shape = (num_states))
     x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (state_input)
-    x = layers.Dense(32, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(64, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(64, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)    
     output = layers.Dense(1, kernel_initializer = keras.initializers.HeNormal()) (x)
     
     critic = keras.Model(inputs = state_input, outputs = output)

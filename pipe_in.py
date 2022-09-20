@@ -1,5 +1,5 @@
 from sys import byteorder
-from common_utils import MODE_INFERENCE, MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM
+from common_utils import MODE_INFERENCE, MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING
 from env.SrsRanEnv import SrsRanEnv
 import multiprocessing as mp
 from Config import Config
@@ -17,8 +17,8 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.scheduling_mode = MODE_SCHEDULING_AC
-        self.training_mode   = MODE_INFERENCE
+        self.scheduling_mode = MODE_SCHEDULING_NO
+        self.training_mode   = MODE_TRAINING
 
         # validity byte
         # observation is: snr, beta, bsr all are integers32
@@ -48,12 +48,12 @@ class Coordinator():
             nd_array[:] = np.full(shape=(2 * self.total_agents), fill_value=0)
 
         try:
-            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (24) * self.total_agents)
+            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (28) * self.total_agents)
         except Exception:
-            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (24) * self.total_agents)    
+            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (28) * self.total_agents)    
 
-        nd_array = np.ndarray(shape=(6 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
-        nd_array[:] = np.full(shape=(6 * self.total_agents), fill_value=0)                
+        nd_array = np.ndarray(shape=(7 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
+        nd_array[:] = np.full(shape=(7 * self.total_agents), fill_value=0)                
 
         self.config = self.get_environment_config()
         self.processes_started_successfully = mp.Value('i', 0)
@@ -103,11 +103,12 @@ class Coordinator():
             seed = i * 35
             num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/infocom/datasets/own_scheduler/tbs_entropy_5/minus_one_sigma/cpu_800_test.csv'
-            load_pretrained_weights = True
+            results_file = '/home/naposto/phd/nokia/infocom/datasets/own_scheduler/new_results_4/cpu_1000_test.csv'
+            # results_file = '/tmp/simulations.csv'
+            load_pretrained_weights = False
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
-            actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'            
-            critic_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/v_critic_weights_1user.h5'
+            actor_pretrained_weights_path = '/home/naposto/phd/nokia/infocom/models/own_scheduler/cpu_very_high__inference__actor.h5'            
+            critic_pretrained_weights_path = '/home/naposto/phd/nokia/infocom/models/own_scheduler/cpu_very_high__inference__critic.h5'
 
 
 
@@ -120,18 +121,18 @@ class Coordinator():
         config = Config()
         config.seed = seed
         config.environment = SrsRanEnv(
-            title = 'SRS RAN Environment', verbose=self.verbose, penalty = 15, 
+            title = 'SRS RAN Environment', verbose=self.verbose, penalty = 5, 
             input_dims = 2, 
             scheduling_mode=self.scheduling_mode)
-        config.num_episodes_to_run = 0
-        config.num_episodes_inference = 20000
+        config.num_episodes_to_run = 1e5
+        config.num_episodes_inference = 0
         config.save_results = True
         config.results_file_path = results_file
         # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_snr_trained_2.csv'
 
         config.save_weights = False
         config.save_weights_period = 1000
-        config.save_weights_file = '/home/naposto/phd/nokia/ai_scheduler/user_1_beta_low_variable_snr/weights'
+        config.save_weights_file = '/home/naposto/phd/nokia/infocom/models/own_scheduler/no_'
         
         config.load_initial_weights = load_pretrained_weights
         if (config.load_initial_weights):
@@ -145,7 +146,7 @@ class Coordinator():
                 'batch_size': 64,
                 'local_update_period': 1,
                 'include_entropy_term': True,
-                'entropy_contribution': 0.2
+                'entropy_contribution': 1
             },
         }
 
@@ -179,7 +180,7 @@ class Coordinator():
     def rcv_return_func(self):
         shm_reward = shared_memory.SharedMemory(create = False,  name = 'result')
         self.reward_nd_array = np.ndarray(
-            shape=(6 * self.total_agents),
+            shape=(7 * self.total_agents),
             dtype= np.int32,
             buffer = shm_reward.buf
         )
@@ -193,7 +194,7 @@ class Coordinator():
                     is_file_open = True
                     print('Opening receive reward socket...')
                     while (True):
-                        content = file_read.read(20)
+                        content = file_read.read(24)
                         if (len(content) <= 0):
                             print('EOF')
                             break
@@ -204,15 +205,16 @@ class Coordinator():
                         dec_bits = int.from_bytes(content[12:16], "little")
                         mcs      = int.from_bytes(content[16:18], "little")
                         prb      = int.from_bytes(content[18:20], "little")
+                        snr      = int.from_bytes(content[20:24], "little")
 
-                        result_buffer = np.array([tti, crc, dec_time, dec_bits, mcs, prb], dtype = np.int32)
+                        result_buffer = np.array([tti, crc, dec_time, dec_bits, mcs, prb, snr], dtype = np.int32)
                         agent_idx = tti % self.total_agents
                         if (self.verbose == 1):
                             print('Res {} - {}'.format(agent_idx, result_buffer))
                         cond_reward = self.cond_rewards[agent_idx]
                         result_buffer[0] = 1
                         with cond_reward:
-                            self.reward_nd_array[agent_idx * 6: (agent_idx + 1) * 6] = result_buffer
+                            self.reward_nd_array[agent_idx * 7: (agent_idx + 1) * 7] = result_buffer
                             cond_reward.notify()
             except FileNotFoundError as e:
                 pass

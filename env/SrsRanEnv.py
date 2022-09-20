@@ -52,8 +52,8 @@ class SrsRanEnv(BaseEnv):
             self.verify_action_nd_array = verify_action_nd_array[agent_idx * 2: (agent_idx + 1) * 2]
 
         self.shm_reward = shared_memory.SharedMemory(create=False, name='result')
-        result_nd_array = np.ndarray(shape=(6 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
-        self.result_nd_array = result_nd_array[agent_idx * 6: (agent_idx + 1) * 6]
+        result_nd_array = np.ndarray(shape=(7 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
+        self.result_nd_array = result_nd_array[agent_idx * 7: (agent_idx + 1) * 7]
 
         
     def step(self, action):
@@ -64,40 +64,42 @@ class SrsRanEnv(BaseEnv):
                 self.cond_action.notify()
             if (self.verbose == 1):
                 print('{} - Act: {}'.format(str(self), action))
-            if (prb > 0):
-                with self.cond_verify_action:
-                    while self.verify_action_nd_array[0] == 0:
-                        self.cond_verify_action.wait(0.001)
+            with self.cond_verify_action:
+                while self.verify_action_nd_array[0] == 0:
+                    self.cond_verify_action.wait(0.001)
 
-                verify_action = self.verify_action_nd_array[1:]
-                self.verify_action_nd_array[0] = 0
-                if (not verify_action):
-                    return None, None, True, None
-                with self.cond_reward:
-                    while self.result_nd_array[0] == 0:
-                        self.cond_reward.wait(0.001)
-                    pass
-                result = self.result_nd_array[1:]
-                self.result_nd_array[0] = 0
-            else:
-                result = np.array([True, 1, 0, 0, 0])
-            crc, decoding_time, tbs, mcs_res, prb_res = result
+            verify_action = self.verify_action_nd_array[1:]
+            self.verify_action_nd_array[0] = 0
+            if (not verify_action):
+                return None, None, True, None
+            with self.cond_reward:
+                while self.result_nd_array[0] == 0:
+                    self.cond_reward.wait(0.001)
+                pass
+            result = self.result_nd_array[1:]
+            self.result_nd_array[0] = 0
+            # if (prb > 0):
+            # else:
+            #     result = np.array([True, 1, 0, 0, 0, 0])
+            crc, decoding_time, tbs, mcs_res, prb_res, snr = result
+            snr_real = snr / 1000.0
             if (mcs_res != mcs or prb_res != prb and self.verbose == 1):
                 string_inside = 'Wrong combination of {}, {}'.format( (mcs, prb), (mcs_res, prb_res))
                 print('{} - {}'.format(str(self), string_inside))
-            reward, _ = super().get_reward(mcs, prb, crc, decoding_time, tbs)
+            reward, _ = super().get_reward(mcs_res, prb_res, crc, decoding_time, tbs)
             if (self.verbose == 1):
                 print('{} - {}'.format(str(self), result.tolist() + [reward]))
             
-            result = super().get_agent_result(reward, mcs, prb, crc, decoding_time, tbs)
+            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr_real)
         else:
             with self.cond_reward:
                 while self.result_nd_array[0] == 0:
                         self.cond_reward.wait(0.001)
             result = self.result_nd_array[1:]
             self.result_nd_array[0] = 0
-            crc, decoding_time, tbs, mcs, prb = result
-            result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs)
+            crc, decoding_time, tbs, mcs, prb, snr = result
+            snr_real = snr / 1000.0
+            result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs, snr_real)
         return result
         
 

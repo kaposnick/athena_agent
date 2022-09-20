@@ -49,11 +49,7 @@ class Actor_Critic_Worker(mp.Process):
         return 'Worker ' + str(self.worker_num)
         
     def init_configuration(self):
-        self.local_update_period = self.config.hyperparameters['Actor_Critic_Common']['local_update_period']
-        self.batch_size = self.config.hyperparameters['Actor_Critic_Common']['batch_size']
-        
-
-    
+        self.local_update_period = self.config.hyperparameters['Actor_Critic_Common']['local_update_period']    
 
     def set_process_seeds(self, worker_num):
         import os
@@ -138,25 +134,13 @@ class Actor_Critic_Worker(mp.Process):
             self.ep_ix += 1
 
             self.batch_info = []
-            batch_idx = 0
-            while batch_idx < self.batch_size:
-                next_state, reward, done, info = self.environment.step(None)
-                if (reward is None):
-                    state = next_state
-                    continue
-                self.batch_info.append(info)
+            next_state, reward, done, info = self.environment.step(None)
+            if (reward is None):
                 state = next_state
-                batch_idx += 1
+                continue
+            self.batch_info.append(info)
+            state = next_state
             self.batch_info_queue.put(self.batch_info)
-
-        # for self.ep_ix in range(self.episodes_to_run):
-        #     self.batch_info = []
-        #     if (self.ep_ix % 1 == 0):
-        #         self.print('Episode {}/{}'.format(self.ep_ix + 1, self.episodes_to_run))
-        #     for _ in range(self.batch_size):
-        #         next_state, reward, done, info = self.environment.step(None)
-        #         self.batch_info.append(info)
-        #     self.send_results(self.batch_info)
 
     def execute_in_schedule_random_mode(self):
         self.set_process_seeds(self.worker_num)
@@ -169,18 +153,16 @@ class Actor_Critic_Worker(mp.Process):
                 ep_ix += 1
                 if (ep_ix % 1 == 0):
                     self.print('Episode {}'.format(ep_ix + 1))
-                batch_idx = 0
                 sample_buffer = []
-                while batch_idx < self.batch_size:
-                    state = self.environment.reset()
-                    next_state, reward, done, info = self.environment.step('random')
-                    if (reward is None):
-                        continue
-                    action = np.array([info['mcs'], info['prb']])
-                    reward = np.array([info['crc'], info['decoding_time']])
-                    sample = (state, action, reward)
-                    sample_buffer.append(sample)
-                    batch_idx += 1
+                state = self.environment.reset()
+                next_state, reward, done, info = self.environment.step('random')
+                if (reward is None):
+                    continue
+                action = np.array([info['mcs'], info['prb']])
+                reward = np.array([info['crc'], info['decoding_time']])
+                sample = (state, action, reward)
+                sample_buffer.append(sample)
+                
                 self.sample_buffer_queue.put(sample_buffer)
         finally:
             print(str(self) + ' -> Exiting...')
@@ -212,38 +194,33 @@ class Actor_Critic_Worker(mp.Process):
 
                 self.batch_info = []
                 self.sample_buffer = []
+                
+                wait_state_time = time.time()
+                state = self.environment.reset()
+                self.print('Wait for state time: {}'.format(time.time() - wait_state_time))
+                done = False
+                while not done:
+                    pick_action_time = time.time()
+                    action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
+                    self.print('Pick action time: {}'.format(time.time() - pick_action_time))
 
-                batch_idx = 0
-                while batch_idx < self.batch_size:
-                    self.print('Batch idx {}'.format(batch_idx))
-                    
-                    wait_state_time = time.time()
-                    state = self.environment.reset()
-                    self.print('Wait for state time: {}'.format(time.time() - wait_state_time))
-                    done = False
-                    while not done:
-                        pick_action_time = time.time()
-                        action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
-                        self.print('Pick action time: {}'.format(time.time() - pick_action_time))
-
-                        step_time = time.time()
-                        next_state, reward, done, info = self.environment.step([action_idx])
-                        if (reward is None):
-                            self.print('Action not applied.. skipping')
-                            state = next_state
-                            continue
-                        self.print('Executing action time: {}'.format(time.time() - step_time))
-
-                        real_action_applied = self.convert_to_real_action_applied(info)
-                        info['mu'] = mu
-                        info['sigma'] = sigma
-
-                        if (self.in_training_mode.value == MODE_TRAINING):                        
-                            self.sample_buffer.append((state, real_action_applied, reward))
-                        
-                        self.batch_info.append(info)
+                    step_time = time.time()
+                    next_state, reward, done, info = self.environment.step([action_idx])
+                    if (reward is None):
+                        self.print('Action not applied.. skipping')
                         state = next_state
-                        batch_idx += 1
+                        continue
+                    self.print('Executing action time: {}'.format(time.time() - step_time))
+
+                    real_action_applied = self.convert_to_real_action_applied(info)
+                    info['mu'] = mu
+                    info['sigma'] = sigma
+
+                    if (self.in_training_mode.value == MODE_TRAINING):                        
+                        self.sample_buffer.append((state, real_action_applied, reward))
+                    
+                    self.batch_info.append(info)
+                    state = next_state
 
                 if (self.in_training_mode.value == MODE_TRAINING):
                     self.sample_buffer_queue.put(self.sample_buffer)
@@ -267,6 +244,7 @@ class Actor_Critic_Worker(mp.Process):
         self.print('{}'.format(state))
         actor_input = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
         mu, sigma = self.actor(actor_input)[0]
+        sigma = 1e-5 + self.tf.math.softplus(sigma)
 
         if (in_training_mode):
             heta_param = np.random.normal(loc = 0, scale = 1)
@@ -282,12 +260,12 @@ class Actor_Critic_Worker(mp.Process):
 
         action = tbs
         self.print('tbs hat: {} - tbs: {}'.format(tbs_hat, tbs))
-        if (in_training_mode):
-            self.print('action hat: {}/{}/{} - action: {}'.format(mu[0].numpy(), sigma[0].numpy(), action_hat, action))
+        # if (in_training_mode):
+        #     self.print('action hat: {}/{}/{} - action: {}'.format(mu[0].numpy(), sigma[0].numpy(), action_hat, action))
         return action_idx, action, mu.numpy(), sigma.numpy()
 
     def print(self, string_to_print, end = None):
-        if (self.worker_num == 2):
+        if (self.worker_num > 12):
             print(str(self) + ' -> ' + string_to_print, end=end)
 
 

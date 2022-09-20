@@ -4,7 +4,7 @@ from attr import has
 from BaseAgent import BaseAgent
 from Buffer import EpisodeBuffer
 
-from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
+from common_utils import MODE_INFERENCE, MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
 import random
 import numpy as np
 
@@ -95,25 +95,90 @@ class Master_Agent(mp.Process):
             raise e
     
     def initiate_variables(self):
-        self.buffer = EpisodeBuffer(20000, self.batch_size, self.state_size, 1)
+        self.buffer = EpisodeBuffer(40000, self.batch_size, self.state_size, 1)
         self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
         self.entropy_contribution = self.config.hyperparameters['Actor_Critic_Common']['entropy_contribution']
 
-    def compute_grads(self, state_batch, action_batch, reward_batch, add_entropy_term = True):            
+    def fn_return_first(self, distr, tensor):
+        tf = self.tf
+        exact = tf.cast(tensor.lookup(tf.constant(0)), dtype=tf.float32)
+        higher = tf.cast(tensor.lookup(tf.constant(1)), dtype=tf.float32)
+        higher_half = tf.math.divide(tf.add(exact, higher), tf.constant(2.0))
+        
+        distr1 = distr.cdf(higher_half)
+        distr2 = distr.cdf(exact)
+
+        result = tf.math.subtract(distr1, distr2)
+        return result
+        # return tf.expand_dims(tf.math.subtract(distr1, distr2), axis = 1)
+
+    def fn_return_last(self, distr, tensor):
+        tf = self.tf        
+        exact = tf.cast(tensor.lookup(tf.constant(self.tbs_len-1)), dtype = tf.float32)
+        lower = tf.cast(tensor.lookup(tf.constant(self.tbs_len-2)), dtype = tf.float32)
+        lower_half = tf.math.divide(tf.add(exact, lower), tf.constant(2.0))
+        
+        distr1 = distr.cdf(exact)
+        distr2 = distr.cdf(lower_half)
+        
+        result = tf.math.subtract(distr1, distr2)
+        return result
+        # return tf.expand_dims(tf.math.subtract(distr1, distr2), axis = 1)
+
+    def fn_return_medio(self, distr, tensor, idx):
+        tf = self.tf
+        exact = tf.cast(tensor.lookup(idx), dtype=tf.float32)
+        higher = tf.cast(tensor.lookup(idx + 1), dtype=tf.float32)
+        lower = tf.cast(tensor.lookup(idx - 1), dtype=tf.float32)
+        higher_half = tf.math.divide(tf.add(exact, higher), tf.constant(2.0))
+        lower_half  = tf.math.divide(tf.add(exact, lower), tf.constant(2.0))
+
+        distr_1 = distr.cdf(higher_half)
+        distr_2 = distr.cdf(lower_half)
+        # result = tf.expand_dims(tf.subtract(distr_1, distr_2), axis = 1)
+        result = tf.subtract(distr_1, distr_2)
+        return result
+
+    def fn_prob(self, distr, action):
+        tf = self.tf
+        idx = self.tbs_values_to_tbs_idx_tensor.lookup(tf.cast(action, dtype=tf.int32))
+        r = tf.where(
+            tf.equal(idx, 0),
+            self.fn_return_first(distr, self.tbs_idx_to_tbs_values_tensor),
+            tf.where(
+                tf.equal(idx, self.tbs_len - 1),
+                self.fn_return_last(distr, self.tbs_idx_to_tbs_values_tensor),
+                self.fn_return_medio(distr, self.tbs_idx_to_tbs_values_tensor, idx)
+            )
+        )
+        return r
+
+    def fn_log_prob(self,distr, action):
+        tf = self.tf
+        return tf.math.log(self.fn_prob(distr, action) + 1e-7)
+
+    def compute_grads(self, state_batch, action_batch, reward_batch, add_entropy_term = True, gradients_update_idx = None):            
         info = {}
+        tf = self.tf
         with self.tf.GradientTape() as tape1, self.tf.GradientTape() as tape2:
-            distr_batch    =  self.actor(state_batch, training = True)
+            mu, sigma    =  self.tf.unstack(self.actor(state_batch, training = True), num = 2, axis = -1)
             critic_batch   = self.critic(state_batch, training = True)
+            mu = tf.expand_dims(mu, axis = 1)
+            sigma = tf.expand_dims(sigma, axis = 1)
             advantage = reward_batch - critic_batch
+
+            sigma = 1e-5 + self.tf.math.softplus(sigma)
+            distr_batch = self.tfp.distributions.Normal(loc = mu, scale = sigma)
             
-            nll = distr_batch.log_prob(action_batch)
+            # nll = distr_batch.log_prob(action_batch)
+            nll = self.fn_log_prob(distr_batch, action_batch)
             actor_advantage_nll = nll * advantage
             actor_loss = actor_advantage_nll
 
             if (add_entropy_term and self.include_entropy_term):
                 entropy = distr_batch.entropy()
                 info['entropy']  = self.tf.math.reduce_mean(entropy)
-                actor_loss += self.entropy_contribution * entropy
+                actor_loss += self.entropy_contribution * entropy * tf.math.pow(tf.constant(0.995), gradients_update_idx)
                         
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
             critic_loss = 0.5 * self.tf.math.reduce_mean(self.tf.math.square(advantage))
@@ -129,22 +194,24 @@ class Master_Agent(mp.Process):
 
         return actor_grads, critic_grads, info
 
-    def compute_sil_grads(self, uniform = True):
+    def compute_sil_grads(self, uniform = False):
         state_batch, action_batch, reward_batch = self.buffer.sample_sil(self.tf, self.critic, uniform = uniform)
-        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = True)
+        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = False, gradients_update_idx = None)
 
-    def compute_a2c_grads(self):
+    def compute_a2c_grads(self, gradients_update_idx):
         state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
-        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = True)
+        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = True, gradients_update_idx = gradients_update_idx)
 
 
-    def learn(self):
-        a2c_actor_grads, a2c_critic_grads, a2c_info = self.compute_a2c_grads()
+    def learn(self, gradient_updates_idx):
+        print(str(self) + ' -> Learning...', end = '')
+        a2c_actor_grads, a2c_critic_grads, a2c_info = self.compute_a2c_grads(gradient_updates_idx)
         self.tf_apply_gradients(a2c_actor_grads, a2c_critic_grads)
 
-        for _ in range(0, 1):
-            sil_actor_grads, sil_critic_grads, sil_info = self.compute_sil_grads(uniform = False)
+        for _ in range(0, 3):
+            sil_actor_grads, sil_critic_grads, sil_info = self.compute_sil_grads(uniform = True)
             self.tf_apply_gradients(sil_actor_grads, sil_critic_grads)
+        print('Done')
         
         info = {
             'actor_loss' : a2c_info['actor_loss'].numpy(),
@@ -158,35 +225,62 @@ class Master_Agent(mp.Process):
         return info
 
     def save_weights(self, suffix = ''):
-        save_weights(self.actor, self.config.save_weights_file + suffix + '_actor.h5', False)
-        save_weights(self.critic, self.config.save_weights_file + suffix + '_critic.h5')
+        if (self.config.save_weights):
+            save_weights(self.actor, self.config.save_weights_file + suffix + '_actor.h5', False)
+            save_weights(self.critic, self.config.save_weights_file + suffix + '_critic.h5')
 
     def apply_gradients(self, actor_grads, critic_grads):
-        actor_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in actor_grads]
+        # actor_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in actor_grads]
         self.actor_critic_optimizer.apply_gradients(
-            zip(actor_gradients, self.actor.trainable_weights)
+            zip(actor_grads, self.actor.trainable_weights)
         )
-        critic_gradients = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in critic_grads]
+        # critic_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in critic_grads]
         self.actor_critic_optimizer.apply_gradients(
-            zip(critic_gradients, self.critic.trainable_weights)
+            zip(critic_grads, self.critic.trainable_weights)
         )
 
-    def send_results(self, info):
-        actor_loss = critic_loss = '-1'
-        rew_mean = entropy = actor_nll = '-1'
-        tbs_mean = tbs_stdv = '-1'
-        if ((self.in_training_mode is not None) and (self.in_training_mode.value == MODE_TRAINING)):
-            actor_loss     = info['actor_loss']
-            critic_loss    = info['critic_loss']
-            rew_mean       = info['reward']
-            entropy        = info['entropy']
-            actor_nll      = info['actor_nll']
-            tbs_mean       = info['action_mean']
-            tbs_stdv       = info['action_stdv']
+    def send_results(self):
         mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
         additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
 
-        self.results_queue.put([ [rew_mean, actor_nll, entropy, mcs_mean, prb_mean, tbs_mean, tbs_stdv, actor_loss, critic_loss], additional_columns ])
+        self.results_queue.put([ [mcs_mean, prb_mean], additional_columns ])
+
+    def create_array(self):
+        tf = self.tf
+        tbs_array = np.array([
+            104,   120,   136,   144,   152,   176,   208,   224,   256,
+            280,   296,   328,   336,   344,   376,   392,   408,   424,
+            440,   456,   472,   488,   504,   520,   536,   552,   568,
+            584,   600,   616,   632,   648,   680,   696,   712,   744,
+            776,   808,   840,   872,   904,   936,   968,  1000,  1032,
+            1064,  1096,  1128,  1160,  1192,  1224,  1256,  1288,  1320,
+            1352,  1384,  1416,  1480,  1544,  1608,  1672,  1736,  1800,
+            1864,  1928,  1992,  2024,  2088,  2152,  2216,  2280,  2344,
+            2408,  2472,  2536,  2600,  2664,  2728,  2792,  2856,  2984,
+            3112,  3240,  3368,  3496,  3624,  3752,  3880,  4008,  4136,
+            4264,  4392,  4584,  4776,  4968,  5160,  5352,  5544,  5736,
+            5992,  6200,  6456,  6712,  6968,  7224,  7480,  7736,  7992,
+            8248,  8504,  8760,  9144,  9528,  9912, 10296, 10680, 11064,
+            11448, 11832, 12216, 12576, 12960, 13536, 14112, 14688, 15264,
+            15840, 16416, 16992, 17568, 18336, 19080, 19848, 20616, 21384,
+            22152, 22920, 24496, 25456, 27376], dtype=np.float32)
+        tbs_map = {}
+        idx = 0
+        for tbs_value in tbs_array:
+            tbs_map[tbs_value] = idx
+            idx += 1
+        tbs_values = tf.cast(tf.constant(list(tbs_map.keys())), dtype=tf.int32)
+        tbs_idx = tf.cast(tf.constant(list(tbs_map.values())), dtype = tf.int32)
+        self.tbs_idx_to_tbs_values_tensor = tf.lookup.StaticHashTable(
+            tf.lookup.KeyValueTensorInitializer(tbs_idx, tbs_values),
+            default_value = 1992
+        )
+
+        self.tbs_values_to_tbs_idx_tensor = tf.lookup.StaticHashTable(
+            tf.lookup.KeyValueTensorInitializer(tbs_values, tbs_idx),
+            default_value = 65
+        )
+        self.tbs_len = len(tbs_array)
 
     def run_in_collecting_stats_mode(self):
         self.set_process_seeds()
@@ -204,7 +298,7 @@ class Master_Agent(mp.Process):
                         for info in info_list:
                             self.batch_info.append(info)
                         sample_idx += 1
-                    self.send_results(info)
+                    self.send_results()
                     sample_idx = 0
                     self.batch_info = []
                 except queue.Empty:
@@ -244,15 +338,28 @@ class Master_Agent(mp.Process):
                     pass
 
 
+    def send_results_thread(self):
+        while(True):
+            self.batch_info = []
+            info_list = self.batch_info_queue.get()
+            for info in info_list:
+                self.batch_info.append(info)
+            self.send_results()
+            self.batch_info = []
+
     def execute_in_schedule_ac_mode(self):
         self.tf, _, self.tfp = import_tensorflow('3', True)
+        import threading
         self.set_process_seeds()  
         exited_successfully = False
         try:
             self.initiate_models()
-            self.initiate_variables()       
+            self.initiate_variables()
+            self.create_array()
             self.tf_apply_gradients = self.tf.function(self.apply_gradients)
             self.tf_compute_grads   = self.tf.function(self.compute_grads)
+            # self.tf_apply_gradients = self.apply_gradients
+            # self.tf_compute_grads   = self.compute_grads
 
             if (self.config.load_initial_weights):
                 print(str(self) + ' -> Loading actor initial weights from ' + self.config.initial_weights_path)
@@ -265,6 +372,7 @@ class Master_Agent(mp.Process):
             
             publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
             print(str(self) + ' -> Published critic weights to shared memory')
+            threading.Thread(target=self.send_results_thread).start()
             self.master_agent_initialized.value = 1
 
             self.actor_critic_optimizer = self.tf.keras.optimizers.Adam(
@@ -273,34 +381,30 @@ class Master_Agent(mp.Process):
             gradient_calculation_idx = 0
             sample_idx = 0
             self.buffer.reset_episode()
-            self.batch_info = []
             has_entered_inference_mode = False
             while True:
                 import queue
                 try:
                     if (self.master_agent_stop.value == 1):
                         break
-                    if (not has_entered_inference_mode) and (self.in_training_mode.value == MODE_TRAINING):
+                    if (not has_entered_inference_mode) and (self.in_training_mode.value == MODE_INFERENCE):
                         has_entered_inference_mode = True
                         print(str(self) + ' -> Entering inference mode...')
-                    while (sample_idx < 1):
+                    while (sample_idx < self.batch_size):
                         if (self.in_training_mode.value == MODE_TRAINING):
                             record_list = self.sample_buffer_queue.get(block = True, timeout = 10)
                             for record in record_list:
                                 self.buffer.record(record)
-                        info_list = self.batch_info_queue.get()
-                        for info in info_list:
-                            self.batch_info.append(info)
+                        elif (self.in_training_mode.value == MODE_INFERENCE):
+                            break
                         sample_idx += 1
 
-                    info = None
                     if (self.in_training_mode.value == MODE_TRAINING):
-                        info = self.learn()
-                    self.send_results(info)
+                        self.learn(gradient_calculation_idx)
                     
                     sample_idx = 0
                     self.buffer.reset_episode()
-                    self.batch_info = []
+                    
 
                     if (self.in_training_mode.value == MODE_TRAINING):
                         with self.optimizer_lock:
@@ -308,7 +412,7 @@ class Master_Agent(mp.Process):
                             publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)
                             publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
                         gradient_calculation_idx += 1
-                        if (self.config.save_weights and gradient_calculation_idx % self.config.save_weights_period == 0):
+                        if (gradient_calculation_idx % self.config.save_weights_period == 0):
                             self.save_weights('_training_')
 
                 except queue.Empty:
@@ -318,8 +422,7 @@ class Master_Agent(mp.Process):
         finally:
             print(str(self) + ' -> Exiting ...')
             if (exited_successfully):
-                if (self.config.save_weights and self.in_training_mode.value == MODE_TRAINING):
-                    self.save_weights('_exiting_')
+                self.save_weights('_inference_')
 
     def run(self) -> None:
         if (self.scheduling_mode == MODE_SCHEDULING_AC):
