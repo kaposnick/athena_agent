@@ -166,7 +166,7 @@ class BaseEnv(gym.Env):
         if (self.policy_output_format == "mcs_prb_joint"):
             columns = ['reward_mean', 'mu_mean', 'sigma_mean', 'crc_ok', 
                     'dec_time_ok_ratio', 'dec_time_ok_mean', 'dec_time_ok_std', 'dec_time_ko_mean', 'dec_time_ko_std', 
-                    'throughput_ok_mean', 'throughput_ok_std', 'snr']
+                    'throughput_ok_mean', 'throughput_ok_std', 'snr', 'cpu']
             return columns
         elif (self.policy_output_format == "mcs_prb_independent"):
             columns = ['mcs', 'prb']
@@ -185,11 +185,13 @@ class BaseEnv(gym.Env):
             sigma = []
             snrs = []
             rewards = []
+            cpus = []
             for info in infos:
                 crc = info['crc']
                 dec_time = info['decoding_time']
                 tbs = info['tbs']
                 snr = info['snr']
+                cpu = info['cpu']
                 reward = info['reward']
                 if crc:
                     num_crc_ok += 1
@@ -201,6 +203,7 @@ class BaseEnv(gym.Env):
 
                 throughput_ok.append(crc * tbs * (dec_time < self.decode_deadline))
                 snrs.append(snr)
+                cpus.append(cpu)
                 if (reward is not None and reward != ''):
                     rewards.append(reward)
                 if 'mu' in info:
@@ -219,6 +222,7 @@ class BaseEnv(gym.Env):
             throughput_ok_mean = np.mean(throughput_ok) / (1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
             throughput_ok_std = np.std(throughput_ok)   / (1024 * 1024) * 1000 if len(throughput_ok) > 0 else -1
             snr_mean = np.mean(snrs) if len(snrs) > 0 else -1
+            cpu_mean = np.mean(cpus) if len(cpus) > 0 else -1
             return [ { 'period': 1, 'value': np.round(reward_mean, 3) },
                      { 'period': 1, 'value': int(mu_mean) },
                      { 'period': 1, 'value': int(sigma_mean) },
@@ -230,7 +234,8 @@ class BaseEnv(gym.Env):
                      { 'period': 1, 'value': int(dec_time_ko_std)},
                      { 'period': 1, 'value': np.round(throughput_ok_mean, 3)},
                      { 'period': 1, 'value': np.round(throughput_ok_std , 3)}, 
-                     { 'period': 1, 'value': np.round(snr_mean, 3) }
+                     { 'period': 1, 'value': np.round(snr_mean, 3) },
+                     { 'period': 1, 'value': np.round(cpu_mean, 3) }
                      ]
         else: raise Exception("Can't handle policy output format")
 
@@ -259,13 +264,14 @@ class BaseEnv(gym.Env):
                 else:
                     if decoding_time == self.decode_deadline:
                         decoding_time -= 10                
-                    reward = (tbs / ( 8 * 1024)) * ( 1 + 1 / (self.decode_deadline - decoding_time) )
+                    # reward = (tbs / ( 8 * 1024)) * ( 1 + 1 / (self.decode_deadline - decoding_time) )
+                    reward = (tbs / ( 8 * 1024)) 
                 # if (decoding_time > self.decode_deadline):
                 #     reward -= 5 * ((decoding_time - self.decode_deadline) / self.decode_deadline)
         return reward, tbs
 
-    def get_agent_result(self, reward, mcs, prb, crc, decoding_time, tbs, snr):
-        return None, reward, True, {'mcs': mcs, 'prb': prb, 'crc': crc, 'decoding_time': decoding_time, 'tbs': tbs, 'snr': snr, 'reward': reward}
+    def get_agent_result(self, reward, mcs, prb, crc, decoding_time, tbs, snr, cpu):
+        return None, reward, True, {'mcs': mcs, 'prb': prb, 'crc': crc, 'decoding_time': decoding_time, 'tbs': tbs, 'snr': snr, 'reward': reward, 'cpu': cpu}
 
     def fn_mcs_prb_joint_action_translation(self, action) -> tuple:
         # in this case action is [action_idx]

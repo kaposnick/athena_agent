@@ -17,7 +17,7 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.scheduling_mode = MODE_SCHEDULING_NO
+        self.scheduling_mode = MODE_SCHEDULING_AC
         self.training_mode   = MODE_TRAINING
 
         # validity byte
@@ -103,7 +103,7 @@ class Coordinator():
             seed = i * 35
             num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/infocom/datasets/own_scheduler/new_results_4/cpu_1000_test.csv'
+            results_file = '/home/naposto/phd/nokia/infocom_4/data.csv'
             # results_file = '/tmp/simulations.csv'
             load_pretrained_weights = False
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
@@ -124,15 +124,15 @@ class Coordinator():
             title = 'SRS RAN Environment', verbose=self.verbose, penalty = 5, 
             input_dims = 2, 
             scheduling_mode=self.scheduling_mode)
-        config.num_episodes_to_run = 1e5
-        config.num_episodes_inference = 0
+        config.num_episodes_to_run = 2e5
+        config.num_episodes_inference = 1e5
         config.save_results = True
         config.results_file_path = results_file
         # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_snr_trained_2.csv'
 
         config.save_weights = False
-        config.save_weights_period = 1000
-        config.save_weights_file = '/home/naposto/phd/nokia/infocom/models/own_scheduler/no_'
+        config.save_weights_period = 100
+        config.save_weights_file = '/home/naposto/phd/nokia/infocom_4/'
         
         config.load_initial_weights = load_pretrained_weights
         if (config.load_initial_weights):
@@ -146,7 +146,7 @@ class Coordinator():
                 'batch_size': 64,
                 'local_update_period': 1,
                 'include_entropy_term': True,
-                'entropy_contribution': 1
+                'entropy_contribution': 2
             },
         }
 

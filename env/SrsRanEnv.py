@@ -1,7 +1,7 @@
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import numpy as np
-from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM, denormalize_state
 
 from env.DecoderEnv import BaseEnv
 
@@ -89,8 +89,8 @@ class SrsRanEnv(BaseEnv):
             reward, _ = super().get_reward(mcs_res, prb_res, crc, decoding_time, tbs)
             if (self.verbose == 1):
                 print('{} - {}'.format(str(self), result.tolist() + [reward]))
-            
-            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr_real)
+            cpu, snr_real = denormalize_state(super().get_observation())
+            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr_real, cpu)
         else:
             with self.cond_reward:
                 while self.result_nd_array[0] == 0:
@@ -99,7 +99,8 @@ class SrsRanEnv(BaseEnv):
             self.result_nd_array[0] = 0
             crc, decoding_time, tbs, mcs, prb, snr = result
             snr_real = snr / 1000.0
-            result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs, snr_real)
+            cpu, snr_real = denormalize_state(super().get_observation())
+            result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs, snr_real, cpu)
         return result
         
 

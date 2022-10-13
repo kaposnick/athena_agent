@@ -34,17 +34,18 @@ class EpisodeBuffer:
         return state_batch, action_batch, reward_batch
 
     def sample_sil(self, tf, critic, uniform):
+        self.sil_batch_size = 1024
         record_range = min(self.buffer_counter, self.buffer_capacity)
         valid_indices = np.arange(0, record_range)
 
         if (uniform):
-            batch_indices = np.random.choice(valid_indices, self.batch_size)
+            batch_indices = np.random.choice(valid_indices, self.sil_batch_size)
         else:
             values  = critic(self.state_buffer[valid_indices], training = False)
             rewards = self.reward_buffer[valid_indices]
             inner_term = np.squeeze(rewards - values)
             valid_indices = np.where(inner_term > 0)
-            batch_indices = np.random.choice(valid_indices[0], self.batch_size)
+            batch_indices = np.random.choice(valid_indices[0], self.sil_batch_size)
 
             # priorities = np.squeeze(np.maximum(rewards - values),0) + 1e-5
             # probabilities = priorities / np.sum(priorities)

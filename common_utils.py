@@ -118,7 +118,7 @@ def get_basic_critic_network(tf, num_states, num_actions):
     critic = keras.Model(inputs = state_input, outputs = output)
     return critic
 
-cpu_min = 1
+cpu_min = 0
 snr_min = 13
 cpu_max = 800
 snr_max = 58
@@ -128,6 +128,12 @@ def normalize_state(state):
     state[0] /= (cpu_max - cpu_min)
     state[1] -= snr_min
     state[1] /= (snr_max - snr_min)
+
+def denormalize_state(state):
+    state = state.copy()
+    state[0] = state[0] * (cpu_max - cpu_min) + cpu_min
+    state[1] = state[1] * (snr_max - snr_min) + snr_min
+    return state
 
 if (__name__== '__main__'):
     tf, os, tfp = import_tensorflow('3', False)

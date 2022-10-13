@@ -95,7 +95,7 @@ class Master_Agent(mp.Process):
             raise e
     
     def initiate_variables(self):
-        self.buffer = EpisodeBuffer(40000, self.batch_size, self.state_size, 1)
+        self.buffer = EpisodeBuffer(100000, self.batch_size, self.state_size, 1)
         self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
         self.entropy_contribution = self.config.hyperparameters['Actor_Critic_Common']['entropy_contribution']
 
@@ -178,7 +178,8 @@ class Master_Agent(mp.Process):
             if (add_entropy_term and self.include_entropy_term):
                 entropy = distr_batch.entropy()
                 info['entropy']  = self.tf.math.reduce_mean(entropy)
-                actor_loss += self.entropy_contribution * entropy * tf.math.pow(tf.constant(0.995), gradients_update_idx)
+                constant = tf.constant(1.0)
+                actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, gradients_update_idx)
                         
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
             critic_loss = 0.5 * self.tf.math.reduce_mean(self.tf.math.square(advantage))
@@ -421,8 +422,7 @@ class Master_Agent(mp.Process):
                         break
         finally:
             print(str(self) + ' -> Exiting ...')
-            if (exited_successfully):
-                self.save_weights('_inference_')
+            self.save_weights('_exiting_')
 
     def run(self) -> None:
         if (self.scheduling_mode == MODE_SCHEDULING_AC):
