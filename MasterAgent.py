@@ -178,7 +178,7 @@ class Master_Agent(mp.Process):
             if (add_entropy_term and self.include_entropy_term):
                 entropy = distr_batch.entropy()
                 info['entropy']  = self.tf.math.reduce_mean(entropy)
-                constant = tf.constant(1.0)
+                constant = tf.constant(.9995)
                 actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, gradients_update_idx)
                         
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
@@ -231,11 +231,11 @@ class Master_Agent(mp.Process):
             save_weights(self.critic, self.config.save_weights_file + suffix + '_critic.h5')
 
     def apply_gradients(self, actor_grads, critic_grads):
-        # actor_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in actor_grads]
+        actor_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in actor_grads]
         self.actor_critic_optimizer.apply_gradients(
             zip(actor_grads, self.actor.trainable_weights)
         )
-        # critic_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in critic_grads]
+        critic_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in critic_grads]
         self.actor_critic_optimizer.apply_gradients(
             zip(critic_grads, self.critic.trainable_weights)
         )

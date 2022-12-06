@@ -17,7 +17,7 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.scheduling_mode = MODE_SCHEDULING_AC
+        self.scheduling_mode = MODE_SCHEDULING_RANDOM
         self.training_mode   = MODE_TRAINING
 
         # validity byte
@@ -103,7 +103,7 @@ class Coordinator():
             seed = i * 35
             num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/infocom_4/data.csv'
+            results_file = '/home/naposto/phd/digital_twin_train_data_5.csv'
             # results_file = '/tmp/simulations.csv'
             load_pretrained_weights = False
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
@@ -124,15 +124,15 @@ class Coordinator():
             title = 'SRS RAN Environment', verbose=self.verbose, penalty = 5, 
             input_dims = 2, 
             scheduling_mode=self.scheduling_mode)
-        config.num_episodes_to_run = 2e5
-        config.num_episodes_inference = 1e5
+        config.num_episodes_to_run = 3e6
+        config.num_episodes_inference = 5e5
         config.save_results = True
         config.results_file_path = results_file
         # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_snr_trained_2.csv'
 
         config.save_weights = False
         config.save_weights_period = 100
-        config.save_weights_file = '/home/naposto/phd/nokia/infocom_4/'
+        config.save_weights_file = '/home/naposto/phd/nokia/infocom_6/'
         
         config.load_initial_weights = load_pretrained_weights
         if (config.load_initial_weights):
@@ -141,7 +141,7 @@ class Coordinator():
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
-                'learning_rate': 5e-4,
+                'learning_rate': 1e-4,
                 'use_state_value_critic': False,
                 'batch_size': 64,
                 'local_update_period': 1,
