@@ -124,10 +124,12 @@ cpu_max = 1000
 snr_max = 35
 def normalize_state(state):
     # cpu, snr1
+    state = state.copy()
     state[0] -= cpu_min
     state[0] /= (cpu_max - cpu_min)
     state[1] -= snr_min
     state[1] /= (snr_max - snr_min)
+    return state
 
 def denormalize_state(state):
     state = state.copy()

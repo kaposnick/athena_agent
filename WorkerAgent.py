@@ -195,36 +195,39 @@ class Actor_Critic_Worker(mp.Process):
                 self.batch_info = []
                 self.sample_buffer = []
                 
-                wait_state_time = time.time()
                 state = self.environment.reset()
-                self.print('Wait for state time: {}'.format(time.time() - wait_state_time))
                 done = False
                 while not done:
                     pick_action_time = time.time()
                     action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
-                    self.print('Pick action time: {}'.format(time.time() - pick_action_time))
 
                     step_time = time.time()
                     next_state, reward, done, info = self.environment.step([action_idx])
                     if (reward is None):
                         self.print('Action not applied.. skipping')
-                        state = next_state
                         continue
-                    self.print('Executing action time: {}'.format(time.time() - step_time))
+                    if ('modified' in info and info['modified'] is True):
+                        self.print('Modified...')
+                        continue
+
 
                     real_action_applied = self.convert_to_real_action_applied(info)
                     info['mu'] = mu
                     info['sigma'] = sigma
 
-                    if (self.in_training_mode.value == MODE_TRAINING):                        
-                        self.sample_buffer.append((state, real_action_applied, reward))
+                    is_state_valid = self.environment.is_valid(state)
+                    if (is_state_valid and self.in_training_mode.value == MODE_TRAINING):
+                        self.sample_buffer.append((normalize_state(state), action, reward))
                     
-                    self.batch_info.append(info)
+                    if (is_state_valid):
+                        self.batch_info.append(info)
                     state = next_state
 
-                if (self.in_training_mode.value == MODE_TRAINING):
+                if (self.in_training_mode.value == MODE_TRAINING and len(self.sample_buffer) > 0):
                     self.sample_buffer_queue.put(self.sample_buffer)
-                self.batch_info_queue.put(self.batch_info)   
+                
+                if (len(self.batch_info) > 0):
+                    self.batch_info_queue.put(self.batch_info)   
                 
         finally:
             print(str(self) + ' -> Exiting...')
@@ -240,7 +243,7 @@ class Actor_Critic_Worker(mp.Process):
 
     def pick_action_from_embedding_table(self, state: np.array):
         in_training_mode = self.in_training_mode.value == MODE_TRAINING
-        normalize_state(state)
+        state = normalize_state(state)
         self.print('{}'.format(state))
         actor_input = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
         mu, sigma = self.actor(actor_input)[0]
@@ -257,15 +260,11 @@ class Actor_Critic_Worker(mp.Process):
         tbs_hat = action_hat
         
         action_idx, tbs = self.environment.get_closest_actions(tbs_hat)
-
         action = tbs
-        self.print('tbs hat: {} - tbs: {}'.format(tbs_hat, tbs))
-        # if (in_training_mode):
-        #     self.print('action hat: {}/{}/{} - action: {}'.format(mu[0].numpy(), sigma[0].numpy(), action_hat, action))
         return action_idx, action, mu.numpy(), sigma.numpy()
 
     def print(self, string_to_print, end = None):
-        if (self.worker_num > 12):
+        if (self.worker_num == 4 and False):
             print(str(self) + ' -> ' + string_to_print, end=end)
 
 

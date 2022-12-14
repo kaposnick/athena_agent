@@ -13,11 +13,12 @@ PROHIBITED_COMBOS = [(0, 0), (0, 1), (0,2), (0, 3),
                   (5, 0), 
                   (6, 0)]
 
-PRB_SPACE = np.array(
-                    [1, 2, 3, 4, 5, 6, 8, 9, 
-                      10, 12, 15, 16, 18, 
-                      20, 24, 25, 27, 
-                      30, 32, 36, 40, 45], dtype = np.float16)
+# PRB_SPACE = np.array(
+#                     [1, 2, 3, 4, 5, 6, 8, 9, 
+#                       10, 12, 15, 16, 18, 
+#                       20, 24, 25, 27, 
+#                       30, 32, 36, 40, 45], dtype = np.float16)
+PRB_SPACE = np.array([45], dtype=np.float16)
 MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 ,24],  dtype=np.float16)  
 I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
@@ -52,13 +53,6 @@ class BaseEnv(gym.Env):
             self.tbs_table = json.load(tbs_json)  
 
         if (self.policy_output_format == "mcs_prb_joint"):
-            # self.action_array = []
-            # self.action_array.append( np.array( [0, 0] ) )
-            # self.mapping_array = [{
-            #     'tbs': 0,
-            #     'mcs': 0.0,
-            #     'prb': 0.0
-            # }]
             self.mapping_array = []
             for mcs in MCS_SPACE:
                 for prb in PRB_SPACE:
@@ -129,6 +123,9 @@ class BaseEnv(gym.Env):
     
     def get_observation(self):
         return self.observation
+
+    def get_tbs_array(self):
+        return self.tbs_array
 
     def find_cross_over(self, arr, low, high, x):
         if (arr[high] <= x):
@@ -325,6 +322,13 @@ class BaseEnv(gym.Env):
 
     def calculate_mean(self, probs, info) -> tuple:
         return self.fn_calculate_mean(probs, info)
+
+    def is_valid(self, state) -> bool:
+        cpu = state[0]
+        snr = state[1]
+        is_valid = (cpu >= 0 and cpu <= 3000)
+        is_valid = is_valid & (snr >= 0 and snr <=35)
+        return is_valid
 
     def __str__(self) -> str:
         return self.title

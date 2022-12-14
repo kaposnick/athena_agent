@@ -248,23 +248,7 @@ class Master_Agent(mp.Process):
 
     def create_array(self):
         tf = self.tf
-        tbs_array = np.array([
-            104,   120,   136,   144,   152,   176,   208,   224,   256,
-            280,   296,   328,   336,   344,   376,   392,   408,   424,
-            440,   456,   472,   488,   504,   520,   536,   552,   568,
-            584,   600,   616,   632,   648,   680,   696,   712,   744,
-            776,   808,   840,   872,   904,   936,   968,  1000,  1032,
-            1064,  1096,  1128,  1160,  1192,  1224,  1256,  1288,  1320,
-            1352,  1384,  1416,  1480,  1544,  1608,  1672,  1736,  1800,
-            1864,  1928,  1992,  2024,  2088,  2152,  2216,  2280,  2344,
-            2408,  2472,  2536,  2600,  2664,  2728,  2792,  2856,  2984,
-            3112,  3240,  3368,  3496,  3624,  3752,  3880,  4008,  4136,
-            4264,  4392,  4584,  4776,  4968,  5160,  5352,  5544,  5736,
-            5992,  6200,  6456,  6712,  6968,  7224,  7480,  7736,  7992,
-            8248,  8504,  8760,  9144,  9528,  9912, 10296, 10680, 11064,
-            11448, 11832, 12216, 12576, 12960, 13536, 14112, 14688, 15264,
-            15840, 16416, 16992, 17568, 18336, 19080, 19848, 20616, 21384,
-            22152, 22920, 24496, 25456, 27376], dtype=np.float32)
+        tbs_array = np.array(self.environment.get_tbs_array(), dtype=np.float32)
         tbs_map = {}
         idx = 0
         for tbs_value in tbs_array:
@@ -359,8 +343,6 @@ class Master_Agent(mp.Process):
             self.create_array()
             self.tf_apply_gradients = self.tf.function(self.apply_gradients)
             self.tf_compute_grads   = self.tf.function(self.compute_grads)
-            # self.tf_apply_gradients = self.apply_gradients
-            # self.tf_compute_grads   = self.compute_grads
 
             if (self.config.load_initial_weights):
                 print(str(self) + ' -> Loading actor initial weights from ' + self.config.initial_weights_path)

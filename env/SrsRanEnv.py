@@ -78,19 +78,19 @@ class SrsRanEnv(BaseEnv):
                 pass
             result = self.result_nd_array[1:]
             self.result_nd_array[0] = 0
-            # if (prb > 0):
-            # else:
-            #     result = np.array([True, 1, 0, 0, 0, 0])
-            crc, decoding_time, tbs, mcs_res, prb_res, snr = result
-            snr_real = snr / 1000.0
-            if (mcs_res != mcs or prb_res != prb and self.verbose == 1):
-                string_inside = 'Wrong combination of {}, {}'.format( (mcs, prb), (mcs_res, prb_res))
-                print('{} - {}'.format(str(self), string_inside))
+            crc, decoding_time, tbs, mcs_res, prb_res, _ = result
             reward, _ = super().get_reward(mcs_res, prb_res, crc, decoding_time, tbs)
             if (self.verbose == 1):
                 print('{} - {}'.format(str(self), result.tolist() + [reward]))
-            cpu, snr_real = denormalize_state(super().get_observation())
-            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr_real, cpu)
+            cpu, snr = super().get_observation()
+            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu)
+            if (mcs_res != mcs or prb_res != prb):
+                result[3]['modified'] = True
+                if (self.verbose == 1):
+                    string_inside = 'Wrong combination of {}, {}'.format( (mcs, prb), (mcs_res, prb_res))
+                    print('{} - {}'.format(str(self), string_inside))
+            else:
+                result[3]['modified'] = False
         else:
             with self.cond_reward:
                 while self.result_nd_array[0] == 0:
@@ -98,9 +98,9 @@ class SrsRanEnv(BaseEnv):
             result = self.result_nd_array[1:]
             self.result_nd_array[0] = 0
             crc, decoding_time, tbs, mcs, prb, snr = result
-            snr_real = snr / 1000.0
-            cpu, snr_real = denormalize_state(super().get_observation())
-            result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs, snr_real, cpu)
+            cpu, snr = super().get_observation()
+            result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs, snr, cpu)
+            result[3]['modified'] = False
         return result
         
 
