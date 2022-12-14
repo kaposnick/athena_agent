@@ -162,7 +162,7 @@ class Actor_Critic_Worker(mp.Process):
                     # to learn from this experience.
                     self.print('Action not applied.. skipping')
                     continue
-                if ('modified' in info and info['modified'] is True):
+                if (info['modified']):
                     # This may happen in cases where the srsRAN chooses to allocate fewer PRBs
                     # than the decides ones. IN this case we don't want to record this sample
                     # on the record file, and we don't want the MasterAgent to learn from this

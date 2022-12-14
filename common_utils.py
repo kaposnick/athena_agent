@@ -100,7 +100,7 @@ def get_basic_actor_network(tf, tfp, num_states):
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    initial_bias = np.array([13500.0, 4500.0])
+    initial_bias = np.array([17500.0, 4500.0])
     output_bias = tf.constant_initializer(initial_bias)
     norm_params = layers.Dense(2, bias_initializer = output_bias)(x)
     actor = keras.Model(state_input, norm_params)
