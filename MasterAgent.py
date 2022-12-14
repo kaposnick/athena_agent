@@ -75,6 +75,10 @@ class Master_Agent(mp.Process):
                 get_basic_critic_network(self.tf, self.state_size, 1)
             ]
 
+            self.optimizer = self.tf.keras.optimizers.Adam(
+                learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate']                
+            )
+
             self.actor = models[0]
             self.actor_memory_bytes.value, actor_dtype = self.compute_model_size(self.actor)
             
@@ -208,25 +212,99 @@ class Master_Agent(mp.Process):
         state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
         return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = True, gradients_update_idx = gradients_update_idx)
 
+    def critic_learn(self, state, reward, record_info = False):
+        tf = self.tf
+        with tf.GradientTape() as tape:
+            td = self.critic(state, training = True) - reward
+            loss = tf.math.reduce_mean(tf.math.square(td))
+        grads = tape.gradient(loss, self.critic.trainable_weights)
+        grads = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in grads]
+        self.optimizer.apply_gradients(zip(grads, self.critic.trainable_weights))
 
-    def learn(self, gradient_updates_idx):
-        print(str(self) + ' -> Learning...', end = '')
-        a2c_actor_grads, a2c_critic_grads, a2c_info = self.compute_a2c_grads(gradient_updates_idx)
-        self.tf_apply_gradients(a2c_actor_grads, a2c_critic_grads)
+        info = {}
+        if (record_info):
+            info['critic_loss'] = self.tf.math.reduce_mean(loss)
+        return info
 
-        for _ in range(0, 3):
-            sil_actor_grads, sil_critic_grads, sil_info = self.compute_sil_grads(uniform = True)
-            self.tf_apply_gradients(sil_actor_grads, sil_critic_grads)
+    def actor_learn(self, state, action, reward, critic, add_entropy_term, gradients_update_idx, record_info = False):
+        tf = self.tf
+        info = {}
+        with tf.GradientTape() as tape:
+            mu, sigma    =  tf.unstack(self.actor(state, training = True), num = 2, axis = -1)
+            mu = tf.expand_dims(mu, axis = 1)
+            sigma = 1e-5 + tf.math.softplus(tf.expand_dims(sigma, axis = 1))
+            advantage = reward - critic
+
+            distr_batch = self.tfp.distributions.Normal(loc = mu, scale = sigma)            
+            nll = self.fn_log_prob(distr_batch, action)
+            actor_advantage_nll = nll * advantage
+            actor_loss = actor_advantage_nll
+            if (add_entropy_term and self.include_entropy_term):
+                entropy = distr_batch.entropy()
+                if (record_info):
+                    info['entropy']  = self.tf.math.reduce_mean(entropy)
+                constant = tf.constant(.9995)
+                actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, gradients_update_idx)
+                        
+            actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
+        grads = tape.gradient(actor_loss, self.actor.trainable_weights)
+        grads = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in grads]
+        self.optimizer.apply_gradients(zip(grads, self.actor.trainable_weights))
+
+        if (record_info):
+            info['actor_loss'] = self.tf.math.reduce_mean(actor_loss)
+            info['reward'] = self.tf.math.reduce_mean(reward)
+            info['actor_nll'] = self.tf.math.reduce_mean(actor_advantage_nll)
+            info['action_mean'] = self.tf.math.reduce_mean(distr_batch.mean())
+            info['action_stddev'] = self.tf.math.reduce_mean(distr_batch.stddev())
+        return info
+
+
+    def learn(self, gradients_update_idx, epochs = 3, sil_updates = 3):
+        # This function performs the policy iteration algorithm which comprises 
+        # the policy evaluation and policy improvement.
+        # First it calculates the A2C updates and later the SIL updates.
+        # The policy evaluation consists of minimizing the MSE of the critic network.
+        # The policy improvement consists of maximizing the NLL of the actor network.
+        
+        print(str(self) + ' -> Learning...')
+        info = {}
+
+        # A2C Learning
+        a2c_state, a2c_action, a2c_reward = self.buffer.sample(self.tf)
+        print('A2C Critic Loss: ', end = '')
+        for i in range(epochs):
+            critic_info = self.tf_critic_learn(a2c_state, a2c_reward, record_info = True)
+            print('{:.2f}, '.format(critic_info['critic_loss'].numpy()), end = '')
         print('Done')
+
+        critic_reward = self.critic(a2c_state)
+        print('A2C Actor Loss: ', end = '')
+        for i in range(epochs):
+            actor_info = self.tf_actor_learn(
+                a2c_state, a2c_action, a2c_reward, critic_reward, 
+                add_entropy_term = True, gradients_update_idx = gradients_update_idx, record_info = True)
+            print('{:.2f}, '.format(actor_info['actor_nll'].numpy()), end = '')
+        print('Done')
+
+        # SIL
+        for _ in range(sil_updates):
+            sil_state, sil_action, sil_reward = self.buffer.sample_sil(self.tf, self.critic, uniform = False)
+            for _ in range(epochs):
+                self.tf_critic_learn(sil_state, sil_reward, record_info = False )
+
+            critic_reward = self.critic(sil_state)
+            for _ in range(epochs):
+                self.tf_actor_learn(sil_state, sil_action, sil_reward, critic_reward, add_entropy_term = False, gradients_update_idx = None, record_info = False)
         
         info = {
-            'actor_loss' : a2c_info['actor_loss'].numpy(),
-            'critic_loss': a2c_info['critic_loss'].numpy(),
-            'reward'     : a2c_info['reward'].numpy(),
-            'entropy'    : a2c_info['entropy'].numpy(),
-            'actor_nll'  : a2c_info['actor_nll'].numpy(),
-            'action_mean': a2c_info['action_mean'].numpy(),
-            'action_stdv': a2c_info['action_stddev'].numpy()
+            'actor_loss' : actor_info['actor_loss'].numpy(),
+            'critic_loss': critic_info['critic_loss'].numpy(),
+            'reward'     : actor_info['reward'].numpy(),
+            'entropy'    : actor_info['entropy'].numpy(),
+            'actor_nll'  : actor_info['actor_nll'].numpy(),
+            'action_mean': actor_info['action_mean'].numpy(),
+            'action_stdv': actor_info['action_stddev'].numpy()
         }
         return info
 
@@ -237,11 +315,11 @@ class Master_Agent(mp.Process):
 
     def apply_gradients(self, actor_grads, critic_grads):
         actor_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in actor_grads]
-        self.actor_critic_optimizer.apply_gradients(
+        self.optimizer.apply_gradients(
             zip(actor_grads, self.actor.trainable_weights)
         )
         critic_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in critic_grads]
-        self.actor_critic_optimizer.apply_gradients(
+        self.optimizer.apply_gradients(
             zip(critic_grads, self.critic.trainable_weights)
         )
 
@@ -360,8 +438,10 @@ class Master_Agent(mp.Process):
             self.initiate_models()
             self.initiate_variables()
             self.create_array()
-            self.tf_apply_gradients = self.tf.function(self.apply_gradients)
-            self.tf_compute_grads   = self.tf.function(self.compute_grads)
+            self.tf_actor_learn = self.tf.function(self.actor_learn)
+            self.tf_critic_learn = self.tf.function(self.critic_learn)
+            # self.tf_apply_gradients = self.tf.function(self.apply_gradients)
+            # self.tf_compute_grads   = self.tf.function(self.compute_grads)
 
             self.load_initial_weights_if_configured()           
             self.publish_weights()
@@ -369,9 +449,6 @@ class Master_Agent(mp.Process):
             threading.Thread(target=self.send_results_thread).start()
             self.master_agent_initialized.value = 1
 
-            self.actor_critic_optimizer = self.tf.keras.optimizers.Adam(
-                learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate']                
-            )
             gradient_calculation_idx = 0
             sample_idx = 0
             self.buffer.reset_episode()
