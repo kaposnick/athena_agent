@@ -31,7 +31,8 @@ class BaseEnv(gym.Env):
                 title: str, 
                 verbose: Number,
                 decode_deadline = 3000, 
-                scheduling_mode = MODE_SCHEDULING_AC) -> None:
+                scheduling_mode = MODE_SCHEDULING_AC, 
+                tbs_table_path = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.json') -> None:
         super(BaseEnv, self).__init__()
         self.min_penalty = penalty
         self.policy_output_format = policy_output_format
@@ -48,7 +49,6 @@ class BaseEnv(gym.Env):
         )
 
         import json
-        tbs_table_path = '/home/naposto/phd/generate_lte_tbs_table/samples/cpp_tbs.json'
         with open(tbs_table_path) as tbs_json:
             self.tbs_table = json.load(tbs_json)  
 
@@ -90,14 +90,8 @@ class BaseEnv(gym.Env):
             self.action_space = spaces.Discrete(len(self.action_array))
             self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
             self.fn_calculate_mean = self.fn_mcs_prb_joint_mean_calculation
-
-        elif (self.policy_output_format == "mcs_prb_independent"):
-            n_actions = (len(MCS_SPACE), len(PRB_SPACE))
-            self.action_space = spaces.MultiDiscrete(n_actions)
-            self.fn_action_translation = self.fn_mcs_prb_indpendent_action_translation
-            self.fn_calculate_mean = self.fn_mcs_prb_independent_mean_calculation
         else:
-            raise Exception("Not allowed policy output format: " + str(self.policy_output_format))
+            raise Exception("Not supported policy output format: " + str(self.policy_output_format))
 
     def presetup(self, inputs):
         pass
@@ -165,10 +159,7 @@ class BaseEnv(gym.Env):
                     'dec_time_ok_ratio', 'dec_time_ok_mean', 'dec_time_ok_std', 'dec_time_ko_mean', 'dec_time_ko_std', 
                     'throughput_ok_mean', 'throughput_ok_std', 'snr', 'cpu']
             return columns
-        elif (self.policy_output_format == "mcs_prb_independent"):
-            columns = ['mcs', 'prb']
-            return columns
-        else: raise Exception("Can't handle policy output format")
+        else: raise Exception("Not supported policy output format")
 
     def get_csv_result_policy_output(self, infos) -> list:
         if (self.policy_output_format == "mcs_prb_joint"):
@@ -253,22 +244,17 @@ class BaseEnv(gym.Env):
         else:
             if tbs is None:
                 tbs = self.to_tbs(mcs, prb)
-            if (not crc):
+            if (not crc or decoding_time > self.decode_deadline):
                 reward = -1 * self.min_penalty
             else:
-                if (decoding_time > self.decode_deadline):
-                    reward = -1 * self.min_penalty
-                else:
-                    if decoding_time == self.decode_deadline:
-                        decoding_time -= 10                
-                    # reward = (tbs / ( 8 * 1024)) * ( 1 + 1 / (self.decode_deadline - decoding_time) )
-                    reward = (tbs / ( 8 * 1024)) 
-                # if (decoding_time > self.decode_deadline):
-                #     reward -= 5 * ((decoding_time - self.decode_deadline) / self.decode_deadline)
+                reward = (tbs / ( 8 * 1024))
         return reward, tbs
 
     def get_agent_result(self, reward, mcs, prb, crc, decoding_time, tbs, snr, cpu):
-        return None, reward, True, {'mcs': mcs, 'prb': prb, 'crc': crc, 'decoding_time': decoding_time, 'tbs': tbs, 'snr': snr, 'reward': reward, 'cpu': cpu}
+        info = {'mcs': mcs, 'prb': prb, 
+                'crc': crc, 'decoding_time': decoding_time, 
+                'tbs': tbs, 'snr': snr, 'reward': reward, 'cpu': cpu}
+        return None, reward, True, info
 
     def fn_mcs_prb_joint_action_translation(self, action) -> tuple:
         # in this case action is [action_idx]
@@ -295,24 +281,7 @@ class BaseEnv(gym.Env):
                     prb += __key_info['prb']
                 mcs_mean = mcs / len(info)
                 prb_mean = prb / len(info)
-        return mcs_mean, prb_mean
-
-    def fn_mcs_prb_indpendent_action_translation(self, action) -> tuple:
-        # in this case action is [mcs_action_idx, prb_action_idx]
-        action_mcs = action[0]
-        action_prb = action[1]
-        assert action_mcs >= 0 and action_mcs < len(MCS_SPACE), 'Action MCS {} not in range'.format(action_mcs)
-        assert action_prb >= 0 and action_prb < len(PRB_SPACE), 'Action PRB {} not in range'.format(action_prb)
-        return int(MCS_SPACE[action_mcs]), int(PRB_SPACE[action_prb])
-
-    def fn_mcs_prb_independent_mean_calculation(self, probs, info) -> tuple:
-        mcs_probs = probs[0]
-        prb_probs = probs[1]
-        mcs_mean = mcs_probs * MCS_SPACE
-        prb_mean = prb_probs * PRB_SPACE
-        return mcs_mean, prb_mean
-
-        
+        return mcs_mean, prb_mean        
 
     def translate_action(self, action) -> tuple:
         if (action == 'random'):
@@ -323,9 +292,8 @@ class BaseEnv(gym.Env):
     def calculate_mean(self, probs, info) -> tuple:
         return self.fn_calculate_mean(probs, info)
 
-    def is_valid(self, state) -> bool:
-        cpu = state[0]
-        snr = state[1]
+    def is_state_valid(self) -> bool:
+        cpu, snr = self.observation
         is_valid = (cpu >= 0 and cpu <= 3000)
         is_valid = is_valid & (snr >= 0 and snr <=35)
         return is_valid

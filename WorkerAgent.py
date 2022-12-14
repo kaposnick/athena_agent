@@ -89,41 +89,12 @@ class Actor_Critic_Worker(mp.Process):
             self.print('Stage: {}, Error initiating models: {}'.format(stage, e))
             raise e
 
-    def initiate_worker_variables(self):
-        self.coef = 5.159817058590249
-        self.intercept = 7.6586417701293446
-
-
     def update_weights(self):
         with self.optimizer_lock:
             self.actor.set_weights(copy.deepcopy(self.weights_actor))            
             self.critic.set_weights(copy.deepcopy(self.weights_critic))
 
-
-    def send_results(self, info):
-        actor_loss = '-1'
-        critic_loss = '-1'
-        rew_mean = '-1'
-        entropy   = '-1'
-        actor_nll = '-1'
-        mcs_mean = '-1'
-        prb_mean = '-1'
-        tbs_mean = '-1'
-        tbs_stdv = '-1'
-        mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
-        additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
-
-        with self.write_to_results_queue_lock:
-            self.results_queue.put([ [self.worker_num, rew_mean, actor_nll, entropy, mcs_mean, prb_mean, tbs_mean, tbs_stdv, actor_loss, critic_loss], additional_columns ])
-
-    def convert_to_real_action_applied(self, info):
-        mcs = int(info['mcs'])
-        prb = int(info['prb'])
-        tbs = self.environment.to_tbs(mcs, prb)
-        return tbs
-        return (np.log(tbs + 1) - self.intercept) / self.coef
-
-    def run_in_collecting_stats_mode(self):
+    def execute_in_collecting_stats_mode(self):
         self.environment.setup(self.worker_num, self.total_workers)
         with self.successfully_started_worker.get_lock():
             self.successfully_started_worker.value += 1
@@ -132,15 +103,10 @@ class Actor_Critic_Worker(mp.Process):
         self.ep_ix = 0
         while (True):
             self.ep_ix += 1
-
-            self.batch_info = []
-            next_state, reward, done, info = self.environment.step(None)
+            _, reward, _, info = self.environment.step(None)
             if (reward is None):
-                state = next_state
                 continue
-            self.batch_info.append(info)
-            state = next_state
-            self.batch_info_queue.put(self.batch_info)
+            self.batch_info_queue.put([info])
 
     def execute_in_schedule_random_mode(self):
         self.set_process_seeds(self.worker_num)
@@ -153,31 +119,25 @@ class Actor_Critic_Worker(mp.Process):
                 ep_ix += 1
                 if (ep_ix % 1 == 0):
                     self.print('Episode {}'.format(ep_ix + 1))
-                sample_buffer = []
                 state = self.environment.reset()
-                next_state, reward, done, info = self.environment.step('random')
+                _, reward, _, info = self.environment.step('random')
                 if (reward is None):
                     continue
                 action = np.array([info['mcs'], info['prb']])
                 reward = np.array([info['crc'], info['decoding_time']])
-                sample = (state, action, reward)
-                sample_buffer.append(sample)
-                
-                self.sample_buffer_queue.put(sample_buffer)
+                self.sample_buffer_queue.put([(state, action, reward)])
         finally:
             print(str(self) + ' -> Exiting...')
 
 
     def execute_in_schedule_ac_mode(self):
         self.tf, _, self.tfp = import_tensorflow('3', True)
-        self.set_process_seeds(self.worker_num)        
-        self.initiate_worker_variables()        
+        self.set_process_seeds(self.worker_num)
         try:
             self.initiate_models()
             self.environment.setup(self.worker_num, self.total_workers)
 
             self.update_weights()
-            self.print('Getting initial weights weights time')
             
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
@@ -187,81 +147,64 @@ class Actor_Critic_Worker(mp.Process):
                 self.ep_ix += 1
                 if (self.ep_ix % 1 == 0):
                     self.print('Episode {}'.format(self.ep_ix + 1))
-                if (self.in_training_mode.value == MODE_TRAINING and (self.ep_ix % self.local_update_period == 0)):
-                    update_weights_time = time.time()
+                if (self.isin_training_mode() and (self.ep_ix % self.local_update_period == 0)):
                     self.update_weights()
-                    self.print('Updating weights time: {}'.format(time.time() - update_weights_time))
-
-                self.batch_info = []
-                self.sample_buffer = []
                 
-                state = self.environment.reset()
-                done = False
-                while not done:
-                    pick_action_time = time.time()
-                    action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
+                environment_state = self.environment.reset()
+                state  = normalize_state(environment_state)
+                action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
 
-                    step_time = time.time()
-                    next_state, reward, done, info = self.environment.step([action_idx])
-                    if (reward is None):
-                        self.print('Action not applied.. skipping')
-                        continue
-                    if ('modified' in info and info['modified'] is True):
-                        self.print('Modified...')
-                        continue
+                _, reward, _, info = self.environment.step([action_idx])
+                if (reward is None):
+                    # This happens in cases where the srsRAN doesn't apply the decided action
+                    # As a result, no reward is being returned from the environment, and we 
+                    # don't want to record this sample on the record file, neither the MasterAgent
+                    # to learn from this experience.
+                    self.print('Action not applied.. skipping')
+                    continue
+                if ('modified' in info and info['modified'] is True):
+                    # This may happen in cases where the srsRAN chooses to allocate fewer PRBs
+                    # than the decides ones. IN this case we don't want to record this sample
+                    # on the record file, and we don't want the MasterAgent to learn from this
+                    # experience.
+                    self.print('Modified...')
+                    continue
 
-
-                    real_action_applied = self.convert_to_real_action_applied(info)
+                if (self.environment.is_state_valid()):
+                    if (self.isin_training_mode()):
+                        self.sample_buffer_queue.put([(state, action, reward)])                
                     info['mu'] = mu
                     info['sigma'] = sigma
-
-                    is_state_valid = self.environment.is_valid(state)
-                    if (is_state_valid and self.in_training_mode.value == MODE_TRAINING):
-                        self.sample_buffer.append((normalize_state(state), action, reward))
-                    
-                    if (is_state_valid):
-                        self.batch_info.append(info)
-                    state = next_state
-
-                if (self.in_training_mode.value == MODE_TRAINING and len(self.sample_buffer) > 0):
-                    self.sample_buffer_queue.put(self.sample_buffer)
-                
-                if (len(self.batch_info) > 0):
-                    self.batch_info_queue.put(self.batch_info)   
+                    self.batch_info_queue.put([info])
                 
         finally:
             print(str(self) + ' -> Exiting...')
 
+    def isin_training_mode(self):
+        return self.in_training_mode.value == MODE_TRAINING
 
     def run(self) -> None:
         if (self.scheduling_mode == MODE_SCHEDULING_NO):
-            self.run_in_collecting_stats_mode()
+            self.execute_in_collecting_stats_mode()
         elif (self.scheduling_mode == MODE_SCHEDULING_AC):
             self.execute_in_schedule_ac_mode()
         elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):
             self.execute_in_schedule_random_mode()
 
     def pick_action_from_embedding_table(self, state: np.array):
-        in_training_mode = self.in_training_mode.value == MODE_TRAINING
-        state = normalize_state(state)
-        self.print('{}'.format(state))
         actor_input = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
         mu, sigma = self.actor(actor_input)[0]
         sigma = 1e-5 + self.tf.math.softplus(sigma)
 
-        if (in_training_mode):
+        if (self.isin_training_mode()):
             heta_param = np.random.normal(loc = 0, scale = 1)
-            action_hat = mu + heta_param * sigma
+            tbs_hat = mu + heta_param * sigma
         else:
             heta_param = np.random.normal(loc = 0, scale = 1)
-            action_hat = mu
-        # action_hat = mean
-
-        tbs_hat = action_hat
+            tbs_hat = mu
         
-        action_idx, tbs = self.environment.get_closest_actions(tbs_hat)
-        action = tbs
-        return action_idx, action, mu.numpy(), sigma.numpy()
+        tbs_idx, tbs = self.environment.get_closest_actions(tbs_hat)
+        return tbs_idx, tbs, mu.numpy(), sigma.numpy()
 
     def print(self, string_to_print, end = None):
         if (self.worker_num == 4 and False):

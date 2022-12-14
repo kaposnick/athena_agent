@@ -55,63 +55,57 @@ class SrsRanEnv(BaseEnv):
         result_nd_array = np.ndarray(shape=(7 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
         self.result_nd_array = result_nd_array[agent_idx * 7: (agent_idx + 1) * 7]
 
+    def receive_state(self):
+        with self.cond_observation:
+            while self.observation_nd_array[0] == 0:
+                self.cond_observation.wait(0.001)
+        self.observation_nd_array[0] = 0
+        return self.observation_nd_array[1:][:self.input_dims].astype(np.float32)
+
+    def apply_action(self, mcs, prb):
+        with self.cond_action:
+            self.action_nd_array[:] = np.array([1, mcs, prb], dtype=np.int32)
+            self.cond_action.notify()
+
+    def verify_action(self):
+        with self.cond_verify_action:
+            while self.verify_action_nd_array[0] == 0:
+                self.cond_verify_action.wait(0.001)
+        verify_action = self.verify_action_nd_array[1:]
+        self.verify_action_nd_array[0] = 0
+        return verify_action
+
+    def receive_reward(self):
+        with self.cond_reward:
+            while self.result_nd_array[0] == 0:
+                self.cond_reward.wait(0.001)
+
+        result = self.result_nd_array[1:]
+        self.result_nd_array[0] = 0
+        return result
         
     def step(self, action):
         if (self.scheduling_mode == MODE_SCHEDULING_AC or self.scheduling_mode == MODE_SCHEDULING_RANDOM):
             mcs, prb = super().translate_action(action)
-            with self.cond_action:
-                self.action_nd_array[:] = np.array([1, mcs, prb], dtype=np.int32)
-                self.cond_action.notify()
-            if (self.verbose == 1):
-                print('{} - Act: {}'.format(str(self), action))
-            with self.cond_verify_action:
-                while self.verify_action_nd_array[0] == 0:
-                    self.cond_verify_action.wait(0.001)
-
-            verify_action = self.verify_action_nd_array[1:]
-            self.verify_action_nd_array[0] = 0
+            self.apply_action(mcs, prb)
+            verify_action = self.verify_action()            
             if (not verify_action):
                 return None, None, True, None
-            with self.cond_reward:
-                while self.result_nd_array[0] == 0:
-                    self.cond_reward.wait(0.001)
-                pass
-            result = self.result_nd_array[1:]
-            self.result_nd_array[0] = 0
-            crc, decoding_time, tbs, mcs_res, prb_res, _ = result
+            crc, decoding_time, tbs, mcs_res, prb_res, _ = self.receive_reward()
             reward, _ = super().get_reward(mcs_res, prb_res, crc, decoding_time, tbs)
-            if (self.verbose == 1):
-                print('{} - {}'.format(str(self), result.tolist() + [reward]))
             cpu, snr = super().get_observation()
             result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu)
-            if (mcs_res != mcs or prb_res != prb):
-                result[3]['modified'] = True
-                if (self.verbose == 1):
-                    string_inside = 'Wrong combination of {}, {}'.format( (mcs, prb), (mcs_res, prb_res))
-                    print('{} - {}'.format(str(self), string_inside))
-            else:
-                result[3]['modified'] = False
+            result[3]['modified'] = mcs_res != mcs or prb_res != prb
         else:
-            with self.cond_reward:
-                while self.result_nd_array[0] == 0:
-                        self.cond_reward.wait(0.001)
-            result = self.result_nd_array[1:]
-            self.result_nd_array[0] = 0
-            crc, decoding_time, tbs, mcs, prb, snr = result
+            crc, decoding_time, tbs, mcs, prb, snr = self.receive_reward()
             cpu, snr = super().get_observation()
             result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs, snr, cpu)
             result[3]['modified'] = False
         return result
         
 
-    def reset(self):
-        with self.cond_observation:
-            while self.observation_nd_array[0] == 0:
-                self.cond_observation.wait(0.001)
-        self.observation_nd_array[0] = 0
-        state = self.observation_nd_array[1:][:self.input_dims].astype(np.float32)
+    def reset(self):        
+        state = self.receive_state()
         super().set_observation(state)
-        if (self.verbose == 1):
-            print('{} - Obs: {}'.format(str(self), self.observation))
         return super().get_observation()
         

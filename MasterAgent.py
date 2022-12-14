@@ -157,6 +157,12 @@ class Master_Agent(mp.Process):
         tf = self.tf
         return tf.math.log(self.fn_prob(distr, action) + 1e-7)
 
+    def policy_evaluation(self):
+        pass
+
+    def policy_iteration(self):
+        pass
+
     def compute_grads(self, state_batch, action_batch, reward_batch, add_entropy_term = True, gradients_update_idx = None):            
         info = {}
         tf = self.tf
@@ -170,7 +176,6 @@ class Master_Agent(mp.Process):
             sigma = 1e-5 + self.tf.math.softplus(sigma)
             distr_batch = self.tfp.distributions.Normal(loc = mu, scale = sigma)
             
-            # nll = distr_batch.log_prob(action_batch)
             nll = self.fn_log_prob(distr_batch, action_batch)
             actor_advantage_nll = nll * advantage
             actor_loss = actor_advantage_nll
@@ -332,6 +337,20 @@ class Master_Agent(mp.Process):
             self.send_results()
             self.batch_info = []
 
+    def load_initial_weights_if_configured(self):
+         if (self.config.load_initial_weights):
+                print(str(self) + ' -> Loading actor initial weights from ' + self.config.initial_weights_path)
+                self.actor.load_weights(self.config.initial_weights_path)
+                print(str(self) + ' -> Loading critic initial weights from ' + self.config.critic_initial_weights_path)
+                self.critic.load_weights(self.config.critic_initial_weights_path)
+
+    def publish_weights(self):
+        publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)                
+        print(str(self) + ' -> Published actor weights to shared memory')
+        
+        publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
+        print(str(self) + ' -> Published critic weights to shared memory')
+
     def execute_in_schedule_ac_mode(self):
         self.tf, _, self.tfp = import_tensorflow('3', True)
         import threading
@@ -344,17 +363,9 @@ class Master_Agent(mp.Process):
             self.tf_apply_gradients = self.tf.function(self.apply_gradients)
             self.tf_compute_grads   = self.tf.function(self.compute_grads)
 
-            if (self.config.load_initial_weights):
-                print(str(self) + ' -> Loading actor initial weights from ' + self.config.initial_weights_path)
-                self.actor.load_weights(self.config.initial_weights_path)
-                print(str(self) + ' -> Loading critic initial weights from ' + self.config.critic_initial_weights_path)
-                self.critic.load_weights(self.config.critic_initial_weights_path)
+            self.load_initial_weights_if_configured()           
+            self.publish_weights()
             
-            publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)                
-            print(str(self) + ' -> Published actor weights to shared memory')
-            
-            publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
-            print(str(self) + ' -> Published critic weights to shared memory')
             threading.Thread(target=self.send_results_thread).start()
             self.master_agent_initialized.value = 1
 
