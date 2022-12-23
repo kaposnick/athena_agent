@@ -161,57 +161,6 @@ class Master_Agent(mp.Process):
         tf = self.tf
         return tf.math.log(self.fn_prob(distr, action) + 1e-7)
 
-    def policy_evaluation(self):
-        pass
-
-    def policy_iteration(self):
-        pass
-
-    def compute_grads(self, state_batch, action_batch, reward_batch, add_entropy_term = True, gradients_update_idx = None):            
-        info = {}
-        tf = self.tf
-        with self.tf.GradientTape() as tape1, self.tf.GradientTape() as tape2:
-            mu, sigma    =  self.tf.unstack(self.actor(state_batch, training = True), num = 2, axis = -1)
-            critic_batch   = self.critic(state_batch, training = True)
-            mu = tf.expand_dims(mu, axis = 1)
-            sigma = tf.expand_dims(sigma, axis = 1)
-            advantage = reward_batch - critic_batch
-
-            sigma = 1e-5 + self.tf.math.softplus(sigma)
-            distr_batch = self.tfp.distributions.Normal(loc = mu, scale = sigma)
-            
-            nll = self.fn_log_prob(distr_batch, action_batch)
-            actor_advantage_nll = nll * advantage
-            actor_loss = actor_advantage_nll
-
-            if (add_entropy_term and self.include_entropy_term):
-                entropy = distr_batch.entropy()
-                info['entropy']  = self.tf.math.reduce_mean(entropy)
-                constant = tf.constant(.9995)
-                actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, gradients_update_idx)
-                        
-            actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
-            critic_loss = 0.5 * self.tf.math.reduce_mean(self.tf.math.square(advantage))
-            info['actor_loss'] = self.tf.math.reduce_mean(actor_loss)
-            info['critic_loss'] = self.tf.math.reduce_mean(critic_loss)
-            info['reward'] = self.tf.math.reduce_mean(reward_batch)
-            info['actor_nll'] = self.tf.math.reduce_mean(actor_advantage_nll)
-            info['action_mean'] = self.tf.math.reduce_mean(distr_batch.mean())
-            info['action_stddev'] = self.tf.math.reduce_mean(distr_batch.stddev())
-        
-        actor_grads  = tape1.gradient(actor_loss, self.actor.trainable_weights)
-        critic_grads = tape2.gradient(critic_loss, self.critic.trainable_weights)
-
-        return actor_grads, critic_grads, info
-
-    def compute_sil_grads(self, uniform = False):
-        state_batch, action_batch, reward_batch = self.buffer.sample_sil(self.tf, self.critic, uniform = uniform)
-        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = False, gradients_update_idx = None)
-
-    def compute_a2c_grads(self, gradients_update_idx):
-        state_batch, action_batch, reward_batch = self.buffer.sample(self.tf)
-        return self.tf_compute_grads(state_batch, action_batch, reward_batch, add_entropy_term = True, gradients_update_idx = gradients_update_idx)
-
     def critic_learn(self, state, reward, record_info = False):
         tf = self.tf
         with tf.GradientTape() as tape:
@@ -243,7 +192,7 @@ class Master_Agent(mp.Process):
                 entropy = distr_batch.entropy()
                 if (record_info):
                     info['entropy']  = self.tf.math.reduce_mean(entropy)
-                constant = tf.constant(.9995)
+                constant = tf.constant(.995)
                 actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, gradients_update_idx)
                         
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
@@ -440,8 +389,6 @@ class Master_Agent(mp.Process):
             self.create_array()
             self.tf_actor_learn = self.tf.function(self.actor_learn)
             self.tf_critic_learn = self.tf.function(self.critic_learn)
-            # self.tf_apply_gradients = self.tf.function(self.apply_gradients)
-            # self.tf_compute_grads   = self.tf.function(self.compute_grads)
 
             self.load_initial_weights_if_configured()           
             self.publish_weights()
