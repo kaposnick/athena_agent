@@ -267,7 +267,7 @@ class Master_Agent(mp.Process):
         # The policy evaluation consists of minimizing the MSE of the critic network.
         # The policy improvement consists of maximizing the NLL of the actor network.
         
-        print(str(self) + ' -> Learning...')
+        print(str(self) + '[{}] -> Learning...'.format(gradients_update_idx))
         info = {}
 
         # A2C Learning
