@@ -124,8 +124,8 @@ class Coordinator():
             title = 'SRS RAN Environment', verbose=self.verbose, penalty = 5, 
             input_dims = 2, 
             scheduling_mode=self.scheduling_mode)
-        config.num_episodes_to_run = 5e5
-        config.num_episodes_inference = 5e4
+        config.num_episodes_to_run = 5e4
+        config.num_episodes_inference = 1e4
         config.save_results = True
         config.results_file_path = results_file
         # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_snr_trained_2.csv'
@@ -142,11 +142,12 @@ class Coordinator():
         config.hyperparameters = {
             'Actor_Critic_Common': {
                 'learning_rate': 1e-4,
+                'clipping': False,
                 'use_state_value_critic': False,
                 'batch_size': 64,
                 'local_update_period': 1,
                 'include_entropy_term': True,
-                'entropy_contribution': 1
+                'entropy_contribution': 0
             },
         }
 
