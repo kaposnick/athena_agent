@@ -104,7 +104,6 @@ class Coordinator():
             num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
             results_file = '/home/naposto/phd/nokia/experiment_mcs_policy/results.csv'
-            # results_file = '/tmp/simulations.csv'
             load_pretrained_weights = False
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
             actor_pretrained_weights_path = '/home/naposto/phd/nokia/infocom/models/own_scheduler/cpu_very_high__inference__actor.h5'            
