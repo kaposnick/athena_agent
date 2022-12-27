@@ -41,6 +41,7 @@ class Master_Agent(mp.Process):
         self.actor_memory_name = actor_memory_name
         self.critic_memory_name = critic_memory_name
         self.batch_size = self.config.hyperparameters['Actor_Critic_Common']['batch_size']
+        self.clipping = self.config.hyperparameters['Actor_Critic_Common']['clipping']
         self.in_training_mode = in_training_mode
         self.scheduling_mode  = scheduling_mode
 
@@ -114,7 +115,6 @@ class Master_Agent(mp.Process):
 
         result = tf.math.subtract(distr1, distr2)
         return result
-        # return tf.expand_dims(tf.math.subtract(distr1, distr2), axis = 1)
 
     def fn_return_last(self, distr, tensor):
         tf = self.tf        
@@ -127,7 +127,6 @@ class Master_Agent(mp.Process):
         
         result = tf.math.subtract(distr1, distr2)
         return result
-        # return tf.expand_dims(tf.math.subtract(distr1, distr2), axis = 1)
 
     def fn_return_medio(self, distr, tensor, idx):
         tf = self.tf
@@ -139,7 +138,6 @@ class Master_Agent(mp.Process):
 
         distr_1 = distr.cdf(higher_half)
         distr_2 = distr.cdf(lower_half)
-        # result = tf.expand_dims(tf.subtract(distr_1, distr_2), axis = 1)
         result = tf.subtract(distr_1, distr_2)
         return result
 
@@ -159,6 +157,7 @@ class Master_Agent(mp.Process):
 
     def fn_log_prob(self,distr, action):
         tf = self.tf
+        return distr.log_prob(action)
         return tf.math.log(self.fn_prob(distr, action) + 1e-7)
 
     def critic_learn(self, state, reward, record_info = False):
@@ -167,7 +166,8 @@ class Master_Agent(mp.Process):
             td = self.critic(state, training = True) - reward
             loss = tf.math.reduce_mean(tf.math.square(td))
         grads = tape.gradient(loss, self.critic.trainable_weights)
-        grads = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in grads]
+        if (self.clipping):
+            grads = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in grads]
         self.optimizer.apply_gradients(zip(grads, self.critic.trainable_weights))
 
         info = {}
@@ -175,7 +175,8 @@ class Master_Agent(mp.Process):
             info['critic_loss'] = self.tf.math.reduce_mean(loss)
         return info
 
-    def actor_learn(self, state, action, reward, critic, add_entropy_term, gradients_update_idx, record_info = False):
+    def actor_learn(self, state, action, reward, critic, add_entropy_term, gradients_update_idx, record_info = False, 
+                    penalize_outof_range = True, coeff_mu_min = 5, coeff_mu_max = 5):
         tf = self.tf
         info = {}
         with tf.GradientTape() as tape:
@@ -192,12 +193,16 @@ class Master_Agent(mp.Process):
                 entropy = distr_batch.entropy()
                 if (record_info):
                     info['entropy']  = self.tf.math.reduce_mean(entropy)
-                constant = tf.constant(.995)
+                constant = tf.constant(.99)
                 actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, gradients_update_idx)
                         
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
+            if (penalize_outof_range):
+                actor_loss += coeff_mu_min * tf.nn.relu(tf.math.negative(mu))
+                actor_loss += coeff_mu_max * tf.nn.relu(mu - 24496)
         grads = tape.gradient(actor_loss, self.actor.trainable_weights)
-        grads = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in grads]
+        if (self.clipping):
+            grads = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in grads]
         self.optimizer.apply_gradients(zip(grads, self.actor.trainable_weights))
 
         if (record_info):
@@ -216,7 +221,7 @@ class Master_Agent(mp.Process):
         # The policy evaluation consists of minimizing the MSE of the critic network.
         # The policy improvement consists of maximizing the NLL of the actor network.
         
-        print(str(self) + '[{}] -> Learning...'.format(gradients_update_idx))
+        print(str(self) + ' [{}] -> Learning...'.format(gradients_update_idx))
         info = {}
 
         # A2C Learning
@@ -262,16 +267,6 @@ class Master_Agent(mp.Process):
             save_weights(self.actor, self.config.save_weights_file + suffix + '_actor.h5', False)
             save_weights(self.critic, self.config.save_weights_file + suffix + '_critic.h5')
 
-    def apply_gradients(self, actor_grads, critic_grads):
-        actor_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in actor_grads]
-        self.optimizer.apply_gradients(
-            zip(actor_grads, self.actor.trainable_weights)
-        )
-        critic_grads = [(self.tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in critic_grads]
-        self.optimizer.apply_gradients(
-            zip(critic_grads, self.critic.trainable_weights)
-        )
-
     def send_results(self):
         mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
         additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
@@ -290,12 +285,12 @@ class Master_Agent(mp.Process):
         tbs_idx = tf.cast(tf.constant(list(tbs_map.values())), dtype = tf.int32)
         self.tbs_idx_to_tbs_values_tensor = tf.lookup.StaticHashTable(
             tf.lookup.KeyValueTensorInitializer(tbs_idx, tbs_values),
-            default_value = 1992
+            default_value = tbs_array[0]
         )
 
         self.tbs_values_to_tbs_idx_tensor = tf.lookup.StaticHashTable(
             tf.lookup.KeyValueTensorInitializer(tbs_values, tbs_idx),
-            default_value = 65
+            default_value = 0
         )
         self.tbs_len = len(tbs_array)
 
@@ -426,7 +421,6 @@ class Master_Agent(mp.Process):
 
                     if (self.in_training_mode.value == MODE_TRAINING):
                         with self.optimizer_lock:
-                            # print(str(self) + ' -> Pushing new weights...')
                             publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)
                             publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
                         gradient_calculation_idx += 1

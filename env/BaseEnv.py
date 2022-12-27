@@ -130,7 +130,9 @@ class BaseEnv(gym.Env):
 
         mid = (low + high) // 2
         if (arr[mid] <= x and arr[mid + 1] > x):
-            return mid
+            if (x - arr[mid] >= arr[mid + 1] - x):
+                return mid + 1
+            else: return mid
         
         if (arr[mid] < x):
             return self.find_cross_over(arr, mid + 1, high, x)

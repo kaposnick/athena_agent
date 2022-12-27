@@ -65,29 +65,7 @@ def save_weights(model, save_weights_file, throw_exception_if_error = False):
     except Exception as e:
         print('Error' + str(e))
         if (throw_exception_if_error):
-            raise e
-
-def get_state_normalization_layer(tf, num_states):
-    mean = np.array([NOISE_MIN, BETA_MIN, BSR_MIN], dtype=np.float32)[:num_states]
-    variance = np.power(np.array([
-        NOISE_MAX - NOISE_MIN,
-        BETA_MAX  - BETA_MIN ,
-        BSR_MAX   - BSR_MIN
-    ], dtype=np.float32), 2)[:num_states]
-    normalization_layer = tf.keras.layers.Normalization(
-        axis = -1, mean = mean, variance = variance
-    )
-    return normalization_layer
-
-def get_action_normalization_layer(tf):
-    action_min = -0.5
-    action_max = +0.5
-    action_variance = np.power(action_max - action_min , 2)
-
-    normalization_layer = tf.keras.layers.Normalization(
-        axis = -1, mean = [action_min], variance = [action_variance])
-    return normalization_layer
-    
+            raise e    
 
 def get_basic_actor_network(tf, tfp, num_states):
     keras = tf.keras
@@ -95,6 +73,8 @@ def get_basic_actor_network(tf, tfp, num_states):
 
     state_input = keras.Input(shape = (num_states))
     x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (state_input)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
