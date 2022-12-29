@@ -42,6 +42,21 @@ class Master_Agent(mp.Process):
         self.critic_memory_name = critic_memory_name
         self.batch_size = self.config.hyperparameters['Actor_Critic_Common']['batch_size']
         self.clipping = self.config.hyperparameters['Actor_Critic_Common']['clipping']
+        self.compute_weights = False
+        self.gradients_update_idx = 0
+
+        self.UPDATE_NN_EVERY = 1
+        self.UPDATE_MEM_EVERY = 20
+        self.UPDATE_MEM_PAR_EVERY = 3000
+        import math
+        self.EXPERIENCES_PER_SAMPLING = math.ceil(self.batch_size * self.UPDATE_MEM_EVERY / self.UPDATE_NN_EVERY)
+        # Initialize time step (for updating every UPDATE_NN_EVERY steps)
+        self.t_step_nn = 0
+        # Initialize time step (for updating every UPDATE_MEM_PAR_EVERY steps)
+        self.t_step_mem_par = 0
+        # Initialize time step (for updating every UPDATE_MEM_EVERY steps)
+        self.t_step_mem = 0
+
         self.in_training_mode = in_training_mode
         self.scheduling_mode  = scheduling_mode
 
@@ -100,7 +115,10 @@ class Master_Agent(mp.Process):
             raise e
     
     def initiate_variables(self):
-        self.buffer = EpisodeBuffer(100000, self.batch_size, self.state_size, 1)
+        self.buffer = EpisodeBuffer(buffer_size=100000, batch_size=self.batch_size, 
+            experiences_per_sampling=self.EXPERIENCES_PER_SAMPLING, 
+            compute_weights = self.compute_weights,
+            state_size=self.state_size, num_actions=1)
         self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
         self.entropy_contribution = self.config.hyperparameters['Actor_Critic_Common']['entropy_contribution']
 
@@ -160,11 +178,14 @@ class Master_Agent(mp.Process):
         return distr.log_prob(action)
         return tf.math.log(self.fn_prob(distr, action) + 1e-7)
 
-    def critic_learn(self, state, reward, record_info = False):
+    def critic_learn(self, state, reward, weights, record_info = False):
         tf = self.tf
         with tf.GradientTape() as tape:
             td = self.critic(state, training = True) - reward
-            loss = tf.math.reduce_mean(tf.math.square(td))
+            loss = tf.math.square(td)
+            if self.compute_weights:
+                loss *= weights
+            loss = tf.math.reduce_mean(loss)
         grads = tape.gradient(loss, self.critic.trainable_weights)
         if (self.clipping):
             grads = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in grads]
@@ -173,9 +194,10 @@ class Master_Agent(mp.Process):
         info = {}
         if (record_info):
             info['critic_loss'] = self.tf.math.reduce_mean(loss)
+            info['td'] = td
         return info
 
-    def actor_learn(self, state, action, reward, critic, add_entropy_term, gradients_update_idx, record_info = False, 
+    def actor_learn(self, state, action, reward, critic, weights, add_entropy_term, record_info = False, 
                     penalize_outof_range = True, coeff_mu_min = 5, coeff_mu_max = 5):
         tf = self.tf
         info = {}
@@ -194,8 +216,10 @@ class Master_Agent(mp.Process):
                 if (record_info):
                     info['entropy']  = self.tf.math.reduce_mean(entropy)
                 constant = tf.constant(.99)
-                actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, gradients_update_idx)
-                        
+                actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, self.gradients_update_idx)
+            
+            if (self.compute_weights):
+                actor_loss = actor_loss * weights
             actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
             if (penalize_outof_range):
                 actor_loss += coeff_mu_min * tf.nn.relu(tf.math.negative(mu))
@@ -214,43 +238,36 @@ class Master_Agent(mp.Process):
         return info
 
 
-    def learn(self, gradients_update_idx, epochs = 3, sil_updates = 3):
+    def learn(self, epochs = 1):
         # This function performs the policy iteration algorithm which comprises 
         # the policy evaluation and policy improvement.
         # First it calculates the A2C updates and later the SIL updates.
         # The policy evaluation consists of minimizing the MSE of the critic network.
         # The policy improvement consists of maximizing the NLL of the actor network.
         
-        print(str(self) + ' [{}] -> Learning...'.format(gradients_update_idx))
+        print(str(self) + ' [{}] -> Learning...'.format(self.gradients_update_idx))
         info = {}
 
         # A2C Learning
-        a2c_state, a2c_action, a2c_reward = self.buffer.sample(self.tf)
+        state, action, reward, weights, indices = self.buffer.sample(self.tf)
         print('A2C Critic Loss: ', end = '')
         for i in range(epochs):
-            critic_info = self.tf_critic_learn(a2c_state, a2c_reward, record_info = True)
+            critic_info = self.tf_critic_learn(state, reward, weights, record_info = True)
+            if (critic_info is not None):
+                delta = np.abs(critic_info['td'].numpy())
+                self.buffer.update_priorities(delta, indices)
             print('{:.2f}, '.format(critic_info['critic_loss'].numpy()), end = '')
         print('Done')
 
-        critic_reward = self.critic(a2c_state)
+        critic_reward = self.critic(state)
         print('A2C Actor Loss: ', end = '')
         for i in range(epochs):
             actor_info = self.tf_actor_learn(
-                a2c_state, a2c_action, a2c_reward, critic_reward, 
-                add_entropy_term = True, gradients_update_idx = gradients_update_idx, record_info = True)
+                state, action, reward, critic_reward, weights, 
+                add_entropy_term = True, record_info = True)
             print('{:.2f}, '.format(actor_info['actor_nll'].numpy()), end = '')
         print('Done')
 
-        # SIL
-        for _ in range(sil_updates):
-            sil_state, sil_action, sil_reward = self.buffer.sample_sil(self.tf, self.critic, uniform = False)
-            for _ in range(epochs):
-                self.tf_critic_learn(sil_state, sil_reward, record_info = False )
-
-            critic_reward = self.critic(sil_state)
-            for _ in range(epochs):
-                self.tf_actor_learn(sil_state, sil_action, sil_reward, critic_reward, add_entropy_term = False, gradients_update_idx = None, record_info = False)
-        
         info = {
             'actor_loss' : actor_info['actor_loss'].numpy(),
             'critic_loss': critic_info['critic_loss'].numpy(),
@@ -373,6 +390,25 @@ class Master_Agent(mp.Process):
         publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
         print(str(self) + ' -> Published critic weights to shared memory')
 
+    def step(self, state, action, reward):
+        self.buffer.record(state, action, reward)
+        self.t_step_nn = (self.t_step_nn + 1) % self.UPDATE_NN_EVERY
+        self.t_step_mem = (self.t_step_mem + 1) % self.UPDATE_MEM_EVERY
+        self.t_step_mem_par = (self.t_step_mem_par + 1) % self.UPDATE_MEM_PAR_EVERY
+        if self.t_step_mem_par == 0:
+            self.buffer.update_parameters()
+        if self.t_step_nn == 0:
+            if self.buffer.experience_count > self.EXPERIENCES_PER_SAMPLING:
+                self.learn()
+                self.gradients_update_idx += 1
+                with self.optimizer_lock:
+                    publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)
+                    publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
+                if (self.gradients_update_idx % self.config.save_weights_period == 0):
+                    self.save_weights('_training_')
+        if self.t_step_mem == 0:
+            self.buffer.update_memory_sampling()
+
     def execute_in_schedule_ac_mode(self):
         self.tf, _, self.tfp = import_tensorflow('3', True)
         import threading
@@ -391,9 +427,6 @@ class Master_Agent(mp.Process):
             threading.Thread(target=self.send_results_thread).start()
             self.master_agent_initialized.value = 1
 
-            gradient_calculation_idx = 0
-            sample_idx = 0
-            self.buffer.reset_episode()
             has_entered_inference_mode = False
             while True:
                 import queue
@@ -403,30 +436,10 @@ class Master_Agent(mp.Process):
                     if (not has_entered_inference_mode) and (self.in_training_mode.value == MODE_INFERENCE):
                         has_entered_inference_mode = True
                         print(str(self) + ' -> Entering inference mode...')
-                    while (sample_idx < self.batch_size):
-                        if (self.in_training_mode.value == MODE_TRAINING):
-                            record_list = self.sample_buffer_queue.get(block = True, timeout = 10)
-                            for record in record_list:
-                                self.buffer.record(record)
-                        elif (self.in_training_mode.value == MODE_INFERENCE):
-                            break
-                        sample_idx += 1
-
                     if (self.in_training_mode.value == MODE_TRAINING):
-                        self.learn(gradient_calculation_idx)
-                    
-                    sample_idx = 0
-                    self.buffer.reset_episode()
-                    
-
-                    if (self.in_training_mode.value == MODE_TRAINING):
-                        with self.optimizer_lock:
-                            publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)
-                            publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
-                        gradient_calculation_idx += 1
-                        if (gradient_calculation_idx % self.config.save_weights_period == 0):
-                            self.save_weights('_training_')
-
+                        record_list = self.sample_buffer_queue.get(block = True, timeout = 10)
+                        state, action, reward = record_list[0] # it used to be a list with only one element 
+                        self.step(state, action, reward)
                 except queue.Empty:
                     if (self.master_agent_stop.value == 1):
                         exited_successfully = True

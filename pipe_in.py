@@ -141,7 +141,7 @@ class Coordinator():
         config.hyperparameters = {
             'Actor_Critic_Common': {
                 'learning_rate': 1e-4,
-                'clipping': False,
+                'clipping': True,
                 'use_state_value_critic': False,
                 'batch_size': 64,
                 'local_update_period': 1,
