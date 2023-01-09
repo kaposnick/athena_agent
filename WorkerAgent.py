@@ -2,7 +2,6 @@ import multiprocessing as mp
 import numpy as np
 import random
 from OUActionNoise import OUActionNoise
-from Buffer import EpisodeBuffer
 from env.BaseEnv import BaseEnv
 from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state
 from Config import Config
@@ -198,6 +197,7 @@ class Actor_Critic_Worker(mp.Process):
 
         if (self.isin_training_mode()):
             heta_param = np.random.normal(loc = 0, scale = 1)
+            heta_param = 3
             tbs_hat = mu + heta_param * sigma
         else:
             heta_param = np.random.normal(loc = 0, scale = 1)

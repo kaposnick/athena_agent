@@ -146,7 +146,7 @@ class Coordinator():
                 'batch_size': 64,
                 'local_update_period': 1,
                 'include_entropy_term': True,
-                'entropy_contribution': 0
+                'entropy_contribution': 1
             },
         }
 

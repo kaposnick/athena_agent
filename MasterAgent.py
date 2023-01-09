@@ -2,7 +2,7 @@ import multiprocessing as mp
 
 from attr import has
 from BaseAgent import BaseAgent
-from Buffer import EpisodeBuffer
+from buffers.Buffer import PERBuffer_Proportional
 
 from common_utils import MODE_INFERENCE, MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
 import random
@@ -42,12 +42,12 @@ class Master_Agent(mp.Process):
         self.critic_memory_name = critic_memory_name
         self.batch_size = self.config.hyperparameters['Actor_Critic_Common']['batch_size']
         self.clipping = self.config.hyperparameters['Actor_Critic_Common']['clipping']
-        self.compute_weights = False
+        self.compute_weights = True
         self.gradients_update_idx = 0
 
-        self.UPDATE_NN_EVERY = 1
+        self.UPDATE_NN_EVERY = 64
         self.UPDATE_MEM_EVERY = 20
-        self.UPDATE_MEM_PAR_EVERY = 3000
+        self.UPDATE_MEM_PAR_EVERY = 300
         import math
         self.EXPERIENCES_PER_SAMPLING = math.ceil(self.batch_size * self.UPDATE_MEM_EVERY / self.UPDATE_NN_EVERY)
         # Initialize time step (for updating every UPDATE_NN_EVERY steps)
@@ -115,10 +115,14 @@ class Master_Agent(mp.Process):
             raise e
     
     def initiate_variables(self):
-        self.buffer = EpisodeBuffer(buffer_size=100000, batch_size=self.batch_size, 
-            experiences_per_sampling=self.EXPERIENCES_PER_SAMPLING, 
-            compute_weights = self.compute_weights,
-            state_size=self.state_size, num_actions=1)
+        # self.buffer = PERBUffer_RankBased(buffer_size=100000, batch_size=self.batch_size, 
+        #     experiences_per_sampling=self.EXPERIENCES_PER_SAMPLING, 
+        #     compute_weights = self.compute_weights,
+        #     state_size=self.state_size, num_actions=1)
+        self.buffer = PERBuffer_Proportional(
+            buffer_size=10000, batch_size=self.batch_size,
+            state_size=self.state_size, num_actions=1,
+            alpha = .6, beta = .4, beta_growth_rate= 1.001)
         self.include_entropy_term = self.config.hyperparameters['Actor_Critic_Common']['include_entropy_term']
         self.entropy_contribution = self.config.hyperparameters['Actor_Critic_Common']['entropy_contribution']
 
@@ -175,7 +179,7 @@ class Master_Agent(mp.Process):
 
     def fn_log_prob(self,distr, action):
         tf = self.tf
-        return distr.log_prob(action)
+        # return distr.log_prob(action)
         return tf.math.log(self.fn_prob(distr, action) + 1e-7)
 
     def critic_learn(self, state, reward, weights, record_info = False):
@@ -218,12 +222,12 @@ class Master_Agent(mp.Process):
                 constant = tf.constant(.99)
                 actor_loss += self.entropy_contribution * entropy * tf.math.pow(constant, self.gradients_update_idx)
             
-            if (self.compute_weights):
-                actor_loss = actor_loss * weights
-            actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
             if (penalize_outof_range):
                 actor_loss += coeff_mu_min * tf.nn.relu(tf.math.negative(mu))
                 actor_loss += coeff_mu_max * tf.nn.relu(mu - 24496)
+            if (self.compute_weights):
+                actor_loss = actor_loss * weights
+            actor_loss  = -1 * self.tf.math.reduce_mean(actor_loss)
         grads = tape.gradient(actor_loss, self.actor.trainable_weights)
         if (self.clipping):
             grads = [(tf.clip_by_value(grad, clip_value_min=-1, clip_value_max=1)) for grad in grads]
@@ -238,7 +242,7 @@ class Master_Agent(mp.Process):
         return info
 
 
-    def learn(self, epochs = 1):
+    def learn(self, epochs = 3):
         # This function performs the policy iteration algorithm which comprises 
         # the policy evaluation and policy improvement.
         # First it calculates the A2C updates and later the SIL updates.
@@ -261,11 +265,11 @@ class Master_Agent(mp.Process):
 
         critic_reward = self.critic(state)
         print('A2C Actor Loss: ', end = '')
-        for i in range(epochs):
+        for i in range(3):
             actor_info = self.tf_actor_learn(
                 state, action, reward, critic_reward, weights, 
                 add_entropy_term = True, record_info = True)
-            print('{:.2f}, '.format(actor_info['actor_nll'].numpy()), end = '')
+            print('{:.2f}, '.format(actor_info['actor_loss'].numpy()), end = '')
         print('Done')
 
         info = {
@@ -391,21 +395,20 @@ class Master_Agent(mp.Process):
         print(str(self) + ' -> Published critic weights to shared memory')
 
     def step(self, state, action, reward):
-        self.buffer.record(state, action, reward)
+        self.buffer.add(state, action, reward)
         self.t_step_nn = (self.t_step_nn + 1) % self.UPDATE_NN_EVERY
         self.t_step_mem = (self.t_step_mem + 1) % self.UPDATE_MEM_EVERY
         self.t_step_mem_par = (self.t_step_mem_par + 1) % self.UPDATE_MEM_PAR_EVERY
         if self.t_step_mem_par == 0:
             self.buffer.update_parameters()
         if self.t_step_nn == 0:
-            if self.buffer.experience_count > self.EXPERIENCES_PER_SAMPLING:
-                self.learn()
-                self.gradients_update_idx += 1
-                with self.optimizer_lock:
-                    publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)
-                    publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
-                if (self.gradients_update_idx % self.config.save_weights_period == 0):
-                    self.save_weights('_training_')
+            self.learn()
+            self.gradients_update_idx += 1
+            with self.optimizer_lock:
+                publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)
+                publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
+            if (self.gradients_update_idx % self.config.save_weights_period == 0):
+                self.save_weights('_training_')
         if self.t_step_mem == 0:
             self.buffer.update_memory_sampling()
 
@@ -418,8 +421,10 @@ class Master_Agent(mp.Process):
             self.initiate_models()
             self.initiate_variables()
             self.create_array()
-            self.tf_actor_learn = self.tf.function(self.actor_learn)
-            self.tf_critic_learn = self.tf.function(self.critic_learn)
+            # self.tf_actor_learn = self.tf.function(self.actor_learn)
+            # self.tf_critic_learn = self.tf.function(self.critic_learn)
+            self.tf_actor_learn = self.actor_learn
+            self.tf_critic_learn = self.critic_learn
 
             self.load_initial_weights_if_configured()           
             self.publish_weights()
