@@ -77,12 +77,8 @@ def get_basic_actor_network(tf, tfp, num_states):
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    initial_bias = np.array([17500.0, 4500.0])
-    output_bias = tf.constant_initializer(initial_bias)
-    norm_params = layers.Dense(2, bias_initializer = output_bias)(x)
+    
+    norm_params = layers.Dense(1, kernel_initializer = keras.initializers.HeNormal())(x)
     actor = keras.Model(state_input, norm_params)
     return actor
 
@@ -90,35 +86,45 @@ def get_basic_critic_network(tf, num_states, num_actions):
     keras = tf.keras
     layers = keras.layers
     state_input = keras.Input(shape = (num_states))
-    x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (state_input)
+    action_input = keras.Input(shape = (num_actions))
+    x = layers.Concatenate()([state_input, action_input])
+    x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)    
-    output = layers.Dense(1, kernel_initializer = keras.initializers.HeNormal()) (x)
-    
-    critic = keras.Model(inputs = state_input, outputs = output)
+    q = layers.Dense(1, kernel_initializer = keras.initializers.HeNormal()) (x)
+    critic = keras.Model(inputs = [state_input, action_input], outputs=q)
+
+    for i in critic.layers:
+      i.trainable=False
+    frozen_critic = keras.Model([state_input, action_input], q)
     return critic
 
 cpu_min = 0
-snr_min = 13
+snr_min = 11
 cpu_max = 1000
-snr_max = 35
+snr_max = 30
 def normalize_state(state):
     # cpu, snr1
     state = state.copy()
-    state[0] -= cpu_min
-    state[0] /= (cpu_max - cpu_min)
-    state[1] -= snr_min
-    state[1] /= (snr_max - snr_min)
+    state[1] -= cpu_min
+    state[1] /= (cpu_max - cpu_min)
+    state[0] -= snr_min
+    state[0] /= (snr_max - snr_min)
     return state
 
 def denormalize_state(state):
     state = state.copy()
-    state[0] = state[0] * (cpu_max - cpu_min) + cpu_min
-    state[1] = state[1] * (snr_max - snr_min) + snr_min
+    state[1] = state[1] * (cpu_max - cpu_min) + cpu_min
+    state[0] = state[0] * (snr_max - snr_min) + snr_min
     return state
+
+tbs_max = 20616
+tbs_min = 104
+def normalize_tbsoutput(tbs):
+    return (tbs - tbs_min) / (tbs_max - tbs_min)
+
+def denormalize_tbs(tbsoutput):
+    return tbsoutput * (tbs_max - tbs_min) + tbs_min
 
 if (__name__== '__main__'):
     tf, os, tfp = import_tensorflow('3', False)

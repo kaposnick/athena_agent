@@ -18,7 +18,7 @@ class Coordinator():
         self.total_agents = 8
         self.verbose = 0
         self.scheduling_mode = MODE_SCHEDULING_AC
-        self.training_mode   = MODE_TRAINING
+        self.training_mode   = MODE_INFERENCE
 
         # validity byte
         # observation is: snr, beta, bsr all are integers32
@@ -104,10 +104,10 @@ class Coordinator():
             num_episodes = 10000
             # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
             results_file = '/home/naposto/phd/nokia/experiment_mcs_policy/results.csv'
-            load_pretrained_weights = False
+            load_pretrained_weights = True
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
-            actor_pretrained_weights_path = '/home/naposto/phd/nokia/infocom/models/own_scheduler/cpu_very_high__inference__actor.h5'            
-            critic_pretrained_weights_path = '/home/naposto/phd/nokia/infocom/models/own_scheduler/cpu_very_high__inference__critic.h5'
+            actor_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_actor_weights.h5'            
+            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_qcritic_weights.h5'
 
 
 

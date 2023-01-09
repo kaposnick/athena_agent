@@ -73,7 +73,7 @@ class Master_Agent(mp.Process):
 
     def compute_model_size(self, model):
         model_dtype = np.dtype(model.dtype)
-        variables = np.sum([np.prod(v.shape) for v in model.trainable_variables])
+        variables = int(np.sum([np.prod(v.shape) for v in model.variables]))
         size = variables * model_dtype.itemsize
         return size, model_dtype
 

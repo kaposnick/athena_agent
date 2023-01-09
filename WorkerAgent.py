@@ -3,7 +3,7 @@ import numpy as np
 import random
 from OUActionNoise import OUActionNoise
 from env.BaseEnv import BaseEnv
-from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state, normalize_tbsoutput, denormalize_tbs
 from Config import Config
 import time
 import copy
@@ -61,7 +61,7 @@ class Actor_Critic_Worker(mp.Process):
     def get_shared_memory_reference(self, model, memory_name):
         ## return the reference to the memory and the np.array pointing to the shared memory
         model_dtype = np.dtype(model.dtype)
-        variables = np.sum([np.prod(v.shape) for v in model.trainable_variables])
+        variables = np.sum([np.prod(v.shape) for v in model.variables])
         size = variables * model_dtype.itemsize
         shm, weights_array = get_shared_memory_ref(size, model_dtype, memory_name)
         return shm, weights_array
@@ -150,7 +150,10 @@ class Actor_Critic_Worker(mp.Process):
                     self.update_weights()
                 
                 environment_state = self.environment.reset()
-                state  = normalize_state(environment_state)
+                _state = environment_state.copy()
+                _state[0] = environment_state[1]
+                _state[1] = environment_state[0]
+                state  = normalize_state(_state)
                 action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
 
                 _, reward, _, info = self.environment.step([action_idx])
@@ -192,19 +195,16 @@ class Actor_Critic_Worker(mp.Process):
 
     def pick_action_from_embedding_table(self, state: np.array):
         actor_input = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
-        mu, sigma = self.actor(actor_input)[0]
-        sigma = 1e-5 + self.tf.math.softplus(sigma)
+        actor_output = self.actor(actor_input)[0]
+        actor_output = denormalize_tbs(actor_output)
 
         if (self.isin_training_mode()):
-            heta_param = np.random.normal(loc = 0, scale = 1)
-            heta_param = 3
-            tbs_hat = mu + heta_param * sigma
+            tbs_hat = actor_output + np.random(0, 1000)
         else:
-            heta_param = np.random.normal(loc = 0, scale = 1)
-            tbs_hat = mu
+            tbs_hat = actor_output
         
         tbs_idx, tbs = self.environment.get_closest_actions(tbs_hat)
-        return tbs_idx, tbs, mu.numpy(), sigma.numpy()
+        return tbs_idx, normalize_tbsoutput(tbs), actor_output, 0
 
     def print(self, string_to_print, end = None):
         if (self.worker_num == 4 and False):
