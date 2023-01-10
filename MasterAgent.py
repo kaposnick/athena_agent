@@ -288,11 +288,11 @@ class Master_Agent(mp.Process):
             save_weights(self.actor, self.config.save_weights_file + suffix + '_actor.h5', False)
             save_weights(self.critic, self.config.save_weights_file + suffix + '_critic.h5')
 
-    def send_results(self):
-        mcs_mean, prb_mean = self.environment.calculate_mean(None, self.batch_info)
-        additional_columns = self.environment.get_csv_result_policy_output(self.batch_info)
+    def send_results(self, batch_info):
+        mcs_mean, prb_mean = self.environment.calculate_mean(None, batch_info)
+        additional_columns = self.environment.get_csv_result_policy_output(batch_info)
 
-        self.results_queue.put([ [mcs_mean, prb_mean], additional_columns ])
+        self.results_queue.put([ [batch_info[0]['timestamp'], batch_info[0]['tti'], batch_info[0]['hrq'], mcs_mean, prb_mean], additional_columns ])
 
     def create_array(self):
         tf = self.tf
@@ -373,12 +373,8 @@ class Master_Agent(mp.Process):
 
     def send_results_thread(self):
         while(True):
-            self.batch_info = []
-            info_list = self.batch_info_queue.get()
-            for info in info_list:
-                self.batch_info.append(info)
-            self.send_results()
-            self.batch_info = []
+            batch_info = self.batch_info_queue.get()
+            self.send_results([batch_info])
 
     def load_initial_weights_if_configured(self):
          if (self.config.load_initial_weights):

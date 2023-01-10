@@ -91,12 +91,9 @@ def get_basic_critic_network(tf, num_states, num_actions):
     x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     q = layers.Dense(1, kernel_initializer = keras.initializers.HeNormal()) (x)
     critic = keras.Model(inputs = [state_input, action_input], outputs=q)
-
-    for i in critic.layers:
-      i.trainable=False
-    frozen_critic = keras.Model([state_input, action_input], q)
     return critic
 
 cpu_min = 0
@@ -106,19 +103,19 @@ snr_max = 30
 def normalize_state(state):
     # cpu, snr1
     state = state.copy()
-    state[1] -= cpu_min
-    state[1] /= (cpu_max - cpu_min)
-    state[0] -= snr_min
-    state[0] /= (snr_max - snr_min)
+    state[0] -= cpu_min
+    state[0] /= (cpu_max - cpu_min)
+    state[1] -= snr_min
+    state[1] /= (snr_max - snr_min)
     return state
 
 def denormalize_state(state):
     state = state.copy()
-    state[1] = state[1] * (cpu_max - cpu_min) + cpu_min
-    state[0] = state[0] * (snr_max - snr_min) + snr_min
+    state[0] = state[0] * (cpu_max - cpu_min) + cpu_min
+    state[1] = state[1] * (snr_max - snr_min) + snr_min
     return state
 
-tbs_max = 20616
+tbs_max = 24496
 tbs_min = 104
 def normalize_tbsoutput(tbs):
     return (tbs - tbs_min) / (tbs_max - tbs_min)

@@ -4,6 +4,7 @@ import numpy as np
 from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM, denormalize_state
 
 from env.DecoderEnv import BaseEnv
+import time
 
 class SrsRanEnv(BaseEnv):
     def __init__(self,
@@ -40,8 +41,8 @@ class SrsRanEnv(BaseEnv):
         super().setup(agent_idx, total_agents)
         if (self.scheduling_mode):
             self.shm_observation = shared_memory.SharedMemory(create=False, name='observation')
-            observation_nd_array = np.ndarray(shape=(4 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
-            self.observation_nd_array = observation_nd_array[agent_idx * 4: (agent_idx+1)*4]
+            observation_nd_array = np.ndarray(shape=(5 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
+            self.observation_nd_array = observation_nd_array[agent_idx * 5: (agent_idx+1)*5] # crc, tti, cpu, snr, bsr
 
             self.shm_action = shared_memory.SharedMemory(create=False, name='action')
             action_nd_array = np.ndarray(shape=(3 * total_agents), dtype=np.int32, buffer = self.shm_action.buf)
@@ -59,8 +60,11 @@ class SrsRanEnv(BaseEnv):
         with self.cond_observation:
             while self.observation_nd_array[0] == 0:
                 self.cond_observation.wait(0.001)
-        self.observation_nd_array[0] = 0
-        return self.observation_nd_array[1:][:self.input_dims].astype(np.float32)
+        self.timestamp = round(time.time() * 1000)
+        self.observation_nd_array[0] = 0 
+        # observation_nd_array: crc, tti, cpu, snr, bsr
+        self.tti = self.observation_nd_array[1]        
+        return self.observation_nd_array[2:4].astype(np.float32) # tti, cpu, snr
 
     def apply_action(self, mcs, prb):
         with self.cond_action:
@@ -95,7 +99,10 @@ class SrsRanEnv(BaseEnv):
             reward, _ = super().get_reward(mcs_res, prb_res, crc, decoding_time, tbs)
             cpu, snr = super().get_observation()
             result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu)
-            result[3]['modified'] = mcs_res != mcs or prb_res != prb
+            result[3]['modified'] = mcs_res != mcs or prb_res != prb            
+            result[3]['tti'] = self.tti
+            result[3]['hrq'] = self.agent_idx
+            result[3]['timestamp'] = self.timestamp
         else:
             crc, decoding_time, tbs, mcs, prb, snr = self.receive_reward()
             cpu, snr = super().get_observation()

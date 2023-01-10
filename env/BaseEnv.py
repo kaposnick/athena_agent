@@ -19,7 +19,7 @@ PRB_SPACE = np.array(
                       20, 24, 25, 27, 
                       30, 32, 36, 40, 45], dtype = np.float16)
 # PRB_SPACE = np.array([45], dtype=np.float16)
-MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22],  dtype=np.float16)  
+MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],  dtype=np.float16)  
 I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
 
@@ -97,6 +97,7 @@ class BaseEnv(gym.Env):
         pass
 
     def setup(self, agent_idx, total_agents):
+        self.agent_idx = agent_idx
         self.set_title('worker_{}'.format(agent_idx))
 
     def get_state_size(self):

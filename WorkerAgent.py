@@ -150,10 +150,7 @@ class Actor_Critic_Worker(mp.Process):
                     self.update_weights()
                 
                 environment_state = self.environment.reset()
-                _state = environment_state.copy()
-                _state[0] = environment_state[1]
-                _state[1] = environment_state[0]
-                state  = normalize_state(_state)
+                state  = normalize_state(environment_state)
                 action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
 
                 _, reward, _, info = self.environment.step([action_idx])
@@ -177,7 +174,7 @@ class Actor_Critic_Worker(mp.Process):
                         self.sample_buffer_queue.put([(state, action, reward)])                
                     info['mu'] = mu
                     info['sigma'] = sigma
-                    self.batch_info_queue.put([info])
+                    self.batch_info_queue.put(info)
                 
         finally:
             print(str(self) + ' -> Exiting...')

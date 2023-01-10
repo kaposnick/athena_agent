@@ -19,8 +19,14 @@ COL_DT_REP = 'rep'
 COL_DT_REWARD_MEAN = 'reward_mean'
 COL_DT_SIM = 'sim'
 
+COL_TIMESTAMP = 'timestamp'
+COL_TTI = 'tti'
+COL_HRQ_IDX = 'hrq'
+
 COLUMNS = [
-    COL_DT_REP, COL_DT_MCS_MEAN, COL_DT_PRB_MEAN ]
+    COL_DT_REP, COL_TIMESTAMP, COL_TTI, COL_HRQ_IDX, COL_DT_MCS_MEAN, COL_DT_PRB_MEAN ]
+
+PIPE_OUT = '/tmp/a3c_pipe_out'
 
 class A3CAgent(BaseAgent):
     def __init__(self, config, num_processes, scheduling_mode = MODE_SCHEDULING_AC, training_mode = MODE_TRAINING) -> None:
@@ -249,6 +255,7 @@ class A3CAgent(BaseAgent):
             f.write('|'.join(COLUMNS + additional_env_columns) + '\n')            
             episode = 0
             has_entered_inference_mode = False
+            string_buffer = ""
             while True:
                 carry_on = True
                 if (episode == self.config.num_episodes_to_run and not has_entered_inference_mode):
@@ -271,8 +278,14 @@ class A3CAgent(BaseAgent):
                                 result.append(str(value))
                             else:
                                 result.append('')
-                        f.write('|'.join(result) + '\n')
-                        f.flush()
+                                
+                        string_buffer += '|'.join(result) + '\n'
+                        # f.flush()
+
+                        if (episode % 10 == 0):
+                            f.write(string_buffer)
+                            f.flush()
+                            string_buffer = ''
                 else: break
 
     def exit_gracefully(self):
