@@ -317,28 +317,16 @@ class Master_Agent(mp.Process):
 
     def run_in_collecting_stats_mode(self):
         self.set_process_seeds()
-        sample_idx = 0
         self.batch_info = []
         try:
+            import threading
+            import time
+            threading.Thread(target=self.send_results_thread).start()
             self.master_agent_initialized.value = 1
             while True:
-                import queue
-                try:
-                    if (self.master_agent_stop.value == 1):
-                        break
-                    while (sample_idx < 1):
-                        info_list = self.batch_info_queue.get()
-                        for info in info_list:
-                            self.batch_info.append(info)
-                        sample_idx += 1
-                    self.send_results()
-                    sample_idx = 0
-                    self.batch_info = []
-                except queue.Empty:
-                    if (self.master_agent_stop.value == 1):
-                        exited_successfully = True
-                        break
-            pass
+                time.sleep(10)
+                if (self.master_agent_stop.value == 1):
+                    break
         finally:
             print(str(self) + ' -> Exiting ...')
 
