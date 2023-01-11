@@ -280,7 +280,6 @@ class A3CAgent(BaseAgent):
                                 result.append('')
                                 
                         string_buffer += '|'.join(result) + '\n'
-                        # f.flush()
 
                         if (episode % 10 == 0):
                             f.write(string_buffer)

@@ -98,14 +98,15 @@ class Actor_Critic_Worker(mp.Process):
         with self.successfully_started_worker.get_lock():
             self.successfully_started_worker.value += 1
         
-        
-        self.ep_ix = 0
         while (True):
-            self.ep_ix += 1
-            _, reward, _, info = self.environment.step(None)
+            state = self.environment.reset()
+            _, reward, _, info = self.environment.step((24, 45))
             if (reward is None):
                 continue
-            self.batch_info_queue.put([info])
+            if (self.environment.is_state_valid()):
+                info['mu'] = -1
+                info['sigma'] = -1
+            self.batch_info_queue.put(info)
 
     def execute_in_schedule_random_mode(self):
         self.set_process_seeds(self.worker_num)

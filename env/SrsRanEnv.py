@@ -24,13 +24,13 @@ class SrsRanEnv(BaseEnv):
              
 
     def presetup(self, inputs):
-        if (self.scheduling_mode):
-            cond_observation = inputs['cond_observation']
-            self.cond_observation = cond_observation
-            
-            cond_action = inputs['cond_action']
-            self.cond_action = cond_action
+        cond_observation = inputs['cond_observation']
+        self.cond_observation = cond_observation
+        
+        cond_action = inputs['cond_action']
+        self.cond_action = cond_action
 
+        if (self.scheduling_mode):
             cond_verify_action = inputs['cond_verify_action']
             self.cond_verify_action = cond_verify_action
         
@@ -39,15 +39,15 @@ class SrsRanEnv(BaseEnv):
 
     def setup(self, agent_idx, total_agents):
         super().setup(agent_idx, total_agents)
+        self.shm_observation = shared_memory.SharedMemory(create=False, name='observation')
+        observation_nd_array = np.ndarray(shape=(5 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
+        self.observation_nd_array = observation_nd_array[agent_idx * 5: (agent_idx+1)*5] # crc, tti, cpu, snr, bsr
+
+        self.shm_action = shared_memory.SharedMemory(create=False, name='action')
+        action_nd_array = np.ndarray(shape=(3 * total_agents), dtype=np.int32, buffer = self.shm_action.buf)
+        self.action_nd_array = action_nd_array[agent_idx * 3: (agent_idx + 1) * 3]
+
         if (self.scheduling_mode):
-            self.shm_observation = shared_memory.SharedMemory(create=False, name='observation')
-            observation_nd_array = np.ndarray(shape=(5 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
-            self.observation_nd_array = observation_nd_array[agent_idx * 5: (agent_idx+1)*5] # crc, tti, cpu, snr, bsr
-
-            self.shm_action = shared_memory.SharedMemory(create=False, name='action')
-            action_nd_array = np.ndarray(shape=(3 * total_agents), dtype=np.int32, buffer = self.shm_action.buf)
-            self.action_nd_array = action_nd_array[agent_idx * 3: (agent_idx + 1) * 3]
-
             self.shm_verify_action = shared_memory.SharedMemory(create=False, name='verify_action')
             verify_action_nd_array = np.ndarray(shape=(2 * total_agents), dtype=np.int32, buffer = self.shm_verify_action.buf)
             self.verify_action_nd_array = verify_action_nd_array[agent_idx * 2: (agent_idx + 1) * 2]
@@ -60,7 +60,7 @@ class SrsRanEnv(BaseEnv):
         with self.cond_observation:
             while self.observation_nd_array[0] == 0:
                 self.cond_observation.wait(0.001)
-        self.timestamp = round(time.time() * 1000)
+        self.timestamp = self.current_timestamp()
         self.observation_nd_array[0] = 0 
         # observation_nd_array: crc, tti, cpu, snr, bsr
         self.tti = self.observation_nd_array[1]        
@@ -104,10 +104,15 @@ class SrsRanEnv(BaseEnv):
             result[3]['hrq'] = self.agent_idx
             result[3]['timestamp'] = self.timestamp
         else:
-            crc, decoding_time, tbs, mcs, prb, snr = self.receive_reward()
+            mcs, prb = action
+            self.apply_action(mcs, prb)            
+            crc, decoding_time, tbs, mcs, prb, _ = self.receive_reward()
             cpu, snr = super().get_observation()
             result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs, snr, cpu)
             result[3]['modified'] = False
+            result[3]['tti'] = self.tti
+            result[3]['hrq'] = self.agent_idx
+            result[3]['timestamp'] = self.timestamp
         return result
         
 
@@ -115,4 +120,7 @@ class SrsRanEnv(BaseEnv):
         state = self.receive_state()
         super().set_observation(state)
         return super().get_observation()
+
+    def current_timestamp(self):
+        return round(time.time() * 1000)
         
