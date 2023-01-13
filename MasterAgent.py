@@ -345,11 +345,11 @@ class Master_Agent(mp.Process):
                         break
                     sample_buffer = self.sample_buffer_queue.get(block = True, timeout = 10)
                     for sample in sample_buffer:
-                        state = sample[0] # snr, cpu
+                        state = sample[0] # cpu, snr
                         action = sample[1] # mcs, prb
                         reward = sample[2] # crc, time
                         
-                        record = [str(state[1]), str(state[0]), str(action[0]), str(action[1]), str(reward[0]), str(reward[1])]
+                        record = [str(state[0]), str(state[1]), str(action[0]), str(action[1]), str(reward[0]), str(reward[1])]
                         file.write('|'.join(record) + '\n')
                     sample_idx += 1
                     if (sample_idx == 10):

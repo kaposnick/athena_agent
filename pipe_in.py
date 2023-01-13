@@ -17,7 +17,7 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 0
-        self.scheduling_mode = MODE_SCHEDULING_NO
+        self.scheduling_mode = MODE_SCHEDULING_RANDOM
         self.training_mode   = MODE_INFERENCE
 
         # validity byte
@@ -105,8 +105,8 @@ class Coordinator():
             results_file = '/home/naposto/phd/nokia/experiment_mcs_policy/results.csv'
             load_pretrained_weights = True
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
-            actor_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_actor_weights.h5'            
-            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_critic_weights.h5'
+            actor_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_actor_weights_penalty_0.h5'            
+            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_critic_weights_penalty_0.h5'
 
 
 
