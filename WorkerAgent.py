@@ -114,18 +114,15 @@ class Actor_Critic_Worker(mp.Process):
             self.environment.setup(self.worker_num, self.total_workers)        
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
-            ep_ix = 0
             while (True):
-                ep_ix += 1
-                if (ep_ix % 1 == 0):
-                    self.print('Episode {}'.format(ep_ix + 1))
                 state = self.environment.reset()
                 _, reward, _, info = self.environment.step('random')
                 if (reward is None):
                     continue
-                action = np.array([info['mcs'], info['prb']])
-                reward = np.array([info['crc'], info['decoding_time']])
-                self.sample_buffer_queue.put([(state, action, reward)])
+                if (self.environment.is_state_valid()):
+                    action = np.array([info['mcs'], info['prb']])
+                    reward = np.array([info['crc'], info['decoding_time']])
+                    self.sample_buffer_queue.put([(state, action, reward)])
         finally:
             print(str(self) + ' -> Exiting...')
 
