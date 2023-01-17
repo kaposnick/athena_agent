@@ -16,8 +16,8 @@ REWARD_IN = '/tmp/return_in'
 class Coordinator():
     def __init__(self):
         self.total_agents = 8
-        self.verbose = 0
-        self.scheduling_mode = MODE_SCHEDULING_RANDOM
+        self.verbose = 1
+        self.scheduling_mode = MODE_SCHEDULING_NO
         self.training_mode   = MODE_INFERENCE
 
         # validity byte
@@ -37,25 +37,21 @@ class Coordinator():
 
         nd_array = np.ndarray(shape=(3 * self.total_agents), dtype=np.int32, buffer=shm_action.buf)
         nd_array[:] = np.full(shape=(3 * self.total_agents), fill_value=0)
-        if (self.in_scheduling_mode()):
-            try:
-                shm_verify_action = shared_memory.SharedMemory(create = True,  name = 'verify_action', size = (8) * self.total_agents)
-            except Exception:
-                shm_verify_action = shared_memory.SharedMemory(create = False, name = 'verify_action', size = (8) * self.total_agents)
+        try:
+            shm_verify_action = shared_memory.SharedMemory(create = True,  name = 'verify_action', size = (8) * self.total_agents)
+        except Exception:
+            shm_verify_action = shared_memory.SharedMemory(create = False, name = 'verify_action', size = (8) * self.total_agents)
 
-            nd_array = np.ndarray(shape=(2 * self.total_agents), dtype=np.int32, buffer=shm_verify_action.buf)
-            nd_array[:] = np.full(shape=(2 * self.total_agents), fill_value=0)
-        else:
-            global VERIFY_ACTION
-            VERIFY_ACTION = '/dev/null'
+        nd_array = np.ndarray(shape=(2 * self.total_agents), dtype=np.int32, buffer=shm_verify_action.buf)
+        nd_array[:] = np.full(shape=(2 * self.total_agents), fill_value=0)
 
         try:
-            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (28) * self.total_agents)
+            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (32) * self.total_agents)
         except Exception:
-            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (28) * self.total_agents)    
+            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (32) * self.total_agents)    
 
-        nd_array = np.ndarray(shape=(7 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
-        nd_array[:] = np.full(shape=(7 * self.total_agents), fill_value=0)                
+        nd_array = np.ndarray(shape=(8 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
+        nd_array[:] = np.full(shape=(8 * self.total_agents), fill_value=0)                
 
         self.config = self.get_environment_config()
         self.processes_started_successfully = mp.Value('i', 0)
@@ -73,8 +69,7 @@ class Coordinator():
 
         self.cond_observations = [mp.Condition() for _ in range(self.total_agents)]
         self.cond_actions      = [mp.Condition() for _ in range(self.total_agents)]
-        if (self.in_scheduling_mode()):
-            self.cond_verify_action= [mp.Condition() for _ in range(self.total_agents)]
+        self.cond_verify_action= [mp.Condition() for _ in range(self.total_agents)]
         self.cond_rewards      = [mp.Condition() for _ in range(self.total_agents)]
 
     def kill_all(self):
@@ -164,8 +159,7 @@ class Coordinator():
             }
             input['cond_observation'] = self.cond_observations[idx]
             input['cond_action']      = self.cond_actions[idx]
-            if (self.in_scheduling_mode()):
-                input['cond_verify_action']     = self.cond_verify_action[idx]
+            input['cond_verify_action']     = self.cond_verify_action[idx]
             inputs.append(input)
         self.a3c_agent.run_n_episodes(self.processes_started_successfully, inputs)
         self.sched_proc.join()
@@ -177,7 +171,7 @@ class Coordinator():
     def rcv_return_func(self):
         shm_reward = shared_memory.SharedMemory(create = False,  name = 'result')
         self.reward_nd_array = np.ndarray(
-            shape=(7 * self.total_agents),
+            shape=(8 * self.total_agents),
             dtype= np.int32,
             buffer = shm_reward.buf
         )
@@ -191,7 +185,7 @@ class Coordinator():
                     is_file_open = True
                     print('Opening receive reward socket...')
                     while (True):
-                        content = file_read.read(24)
+                        content = file_read.read(28)
                         if (len(content) <= 0):
                             print('EOF')
                             break
@@ -203,15 +197,16 @@ class Coordinator():
                         mcs      = int.from_bytes(content[16:18], "little")
                         prb      = int.from_bytes(content[18:20], "little")
                         snr      = int.from_bytes(content[20:24], "little")
+                        noise    = int.from_bytes(content[24:28], "little")
 
-                        result_buffer = np.array([tti, crc, dec_time, dec_bits, mcs, prb, snr], dtype = np.int32)
+                        result_buffer = np.array([tti, crc, dec_time, dec_bits, mcs, prb, snr, noise], dtype = np.int32)
                         agent_idx = tti % self.total_agents
                         if (self.verbose == 1):
                             print('Res {} - {}'.format(agent_idx, result_buffer))
                         cond_reward = self.cond_rewards[agent_idx]
                         result_buffer[0] = 1
                         with cond_reward:
-                            self.reward_nd_array[agent_idx * 7: (agent_idx + 1) * 7] = result_buffer
+                            self.reward_nd_array[agent_idx * 8: (agent_idx + 1) * 8] = result_buffer
                             cond_reward.notify()
             except FileNotFoundError as e:
                 pass
@@ -220,10 +215,8 @@ class Coordinator():
 
     def rcv_obs_send_act_func(self):
         shm_observation = shared_memory.SharedMemory(create = False,  name = 'observation')
-        shm_action = shared_memory.SharedMemory(create = False,  name = 'action')
-        
-        if (self.in_scheduling_mode()):
-            shm_verify_action = shared_memory.SharedMemory(create = False, name = 'verify_action')
+        shm_action = shared_memory.SharedMemory(create = False,  name = 'action')        
+        shm_verify_action = shared_memory.SharedMemory(create = False, name = 'verify_action')
 
         self.observation_nd_array = np.ndarray(
             shape=(5 * self.total_agents), 
@@ -237,12 +230,11 @@ class Coordinator():
             buffer = shm_action.buf
         )
 
-        if (self.in_scheduling_mode()):
-            self.verify_action_nd_array = np.ndarray(
-                shape=(2 * self.total_agents),
-                dtype= np.int32,
-                buffer = shm_verify_action.buf
-            )
+        self.verify_action_nd_array = np.ndarray(
+            shape=(2 * self.total_agents),
+            dtype= np.int32,
+            buffer = shm_verify_action.buf
+        )
 
         while (self.processes_started_successfully.value == 0):
             pass
@@ -296,16 +288,15 @@ class Coordinator():
                                         file_write.write(ext_byte_arr)
                                         file_write.flush()
 
-                                        if (self.in_scheduling_mode()):
-                                            cond_verify_action = self.cond_verify_action[agent_idx]
-                                            verify_action_content = verify_action_fd.read(4)
-                                            if (len(verify_action_content) < 0):
-                                                print('EOF')
-                                                break
-                                            action_verified = int.from_bytes(verify_action_content[0: 4], "little")
-                                            with cond_verify_action:
-                                                self.verify_action_nd_array[agent_idx * 2: (agent_idx + 1) * 2] = np.array([1, action_verified], dtype = np.int32)
-                                                cond_verify_action.notify()
+                                        cond_verify_action = self.cond_verify_action[agent_idx]
+                                        verify_action_content = verify_action_fd.read(4)
+                                        if (len(verify_action_content) < 0):
+                                            print('EOF')
+                                            break
+                                        action_verified = int.from_bytes(verify_action_content[0: 4], "little")
+                                        with cond_verify_action:
+                                            self.verify_action_nd_array[agent_idx * 2: (agent_idx + 1) * 2] = np.array([1, action_verified], dtype = np.int32)
+                                            cond_verify_action.notify()
                         except FileNotFoundError as e:
                             if (is_actor_in_open and is_verify_action_open):
                                 raise e

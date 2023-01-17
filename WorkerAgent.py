@@ -99,6 +99,7 @@ class Actor_Critic_Worker(mp.Process):
             self.successfully_started_worker.value += 1
         
         while (True):
+            self.print('Reading state')
             state = self.environment.reset()
             _, reward, _, info = self.environment.step((24, 45))
             if (reward is None):
@@ -116,12 +117,22 @@ class Actor_Critic_Worker(mp.Process):
                 self.successfully_started_worker.value += 1
             while (True):
                 state = self.environment.reset()
-                _, reward, _, info = self.environment.step('random')
+                action_idx = 533 # mcs = 22, prb = 45
+                action = [action_idx]
+                action = 'random'
+                _, reward, _, info = self.environment.step(action)
                 if (reward is None):
+                    continue
+                if (info['modified']):
+                    # This may happen in cases where the srsRAN chooses to allocate fewer PRBs
+                    # than the decides ones. IN this case we don't want to record this sample
+                    # on the record file, and we don't want the MasterAgent to learn from this
+                    # experience.
+                    self.print('Modified...')
                     continue
                 if (self.environment.is_state_valid()):
                     action = np.array([info['mcs'], info['prb']])
-                    reward = np.array([info['crc'], info['decoding_time']])
+                    reward = np.array([info['crc'], info['decoding_time'], info['snr_decode'], info['noise_decode']])
                     self.sample_buffer_queue.put([(state, action, reward)])
         finally:
             print(str(self) + ' -> Exiting...')
@@ -202,7 +213,7 @@ class Actor_Critic_Worker(mp.Process):
         return tbs_idx, normalize_tbsoutput(tbs), actor_output, 0
 
     def print(self, string_to_print, end = None):
-        if (self.worker_num == 4 and False):
+        if ((self.worker_num == 4 and False) or True):
             print(str(self) + ' -> ' + string_to_print, end=end)
 
 

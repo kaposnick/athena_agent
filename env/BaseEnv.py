@@ -160,7 +160,7 @@ class BaseEnv(gym.Env):
         if (self.policy_output_format == "mcs_prb_joint"):
             columns = ['reward_mean', 'mu_mean', 'sigma_mean', 'crc_ok', 
                     'dec_time_ok_ratio', 'dec_time_ok_mean', 'dec_time_ok_std', 'dec_time_ko_mean', 'dec_time_ko_std', 
-                    'throughput_ok_mean', 'throughput_ok_std', 'snr', 'cpu']
+                    'throughput_ok_mean', 'throughput_ok_std', 'snr', 'cpu', 'snr_decode', 'noise_decode']
             return columns
         else: raise Exception("Not supported policy output format")
 
@@ -226,8 +226,9 @@ class BaseEnv(gym.Env):
                      { 'period': 1, 'value': np.round(throughput_ok_mean, 3)},
                      { 'period': 1, 'value': np.round(throughput_ok_std , 3)}, 
                      { 'period': 1, 'value': np.round(snr_mean, 3) },
-                     { 'period': 1, 'value': np.round(cpu_mean, 3) }
-                     ]
+                     { 'period': 1, 'value': np.round(cpu_mean, 3) },
+                     { 'period': 1, 'value': np.round(infos[0]['snr_decode'], 3)},
+                     { 'period': 1, 'value': np.round(infos[0]['noise_decode'], 3)}]
         else: raise Exception("Can't handle policy output format")
 
 
@@ -253,10 +254,10 @@ class BaseEnv(gym.Env):
                 reward = (tbs / ( 8 * 1024))
         return reward, tbs
 
-    def get_agent_result(self, reward, mcs, prb, crc, decoding_time, tbs, snr, cpu):
+    def get_agent_result(self, reward, mcs, prb, crc, decoding_time, tbs, snr, cpu, snr_res, noise_dbm):
         info = {'mcs': mcs, 'prb': prb, 
                 'crc': crc, 'decoding_time': decoding_time, 
-                'tbs': tbs, 'snr': snr, 'reward': reward, 'cpu': cpu}
+                'tbs': tbs, 'snr': snr, 'reward': reward, 'cpu': cpu, 'snr_decode': snr_res, 'noise_decode': noise_dbm}
         return None, reward, True, info
 
     def fn_mcs_prb_joint_action_translation(self, action) -> tuple:

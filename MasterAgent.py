@@ -337,7 +337,7 @@ class Master_Agent(mp.Process):
         import queue
         filename = self.config.results_file_path
         with open(filename, 'w') as file:
-            file.write('|'.join(['cpu', 'snr', 'mcs', 'prb', 'crc', 'decoding_time']) + '\n')
+            file.write('|'.join(['cpu', 'snr', 'mcs', 'prb', 'crc', 'decoding_time', 'snr_decode', 'noise_decode']) + '\n')
             sample_idx = 0
             while True:
                 try:
@@ -347,9 +347,9 @@ class Master_Agent(mp.Process):
                     for sample in sample_buffer:
                         state = sample[0] # cpu, snr
                         action = sample[1] # mcs, prb
-                        reward = sample[2] # crc, time
+                        reward = sample[2] # crc, time, snr_decode, noise_decode
                         
-                        record = [str(state[0]), str(state[1]), str(action[0]), str(action[1]), str(reward[0]), str(reward[1])]
+                        record = [str(state[0]), str(state[1]), str(action[0]), str(action[1]), str(reward[0]), str(reward[1]), str(reward[2]), str(reward[3])]
                         file.write('|'.join(record) + '\n')
                     sample_idx += 1
                     if (sample_idx == 10):

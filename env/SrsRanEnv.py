@@ -30,9 +30,8 @@ class SrsRanEnv(BaseEnv):
         cond_action = inputs['cond_action']
         self.cond_action = cond_action
 
-        if (self.scheduling_mode):
-            cond_verify_action = inputs['cond_verify_action']
-            self.cond_verify_action = cond_verify_action
+        cond_verify_action = inputs['cond_verify_action']
+        self.cond_verify_action = cond_verify_action
         
         cond_reward = inputs['cond_reward']
         self.cond_reward = cond_reward
@@ -47,21 +46,20 @@ class SrsRanEnv(BaseEnv):
         action_nd_array = np.ndarray(shape=(3 * total_agents), dtype=np.int32, buffer = self.shm_action.buf)
         self.action_nd_array = action_nd_array[agent_idx * 3: (agent_idx + 1) * 3]
 
-        if (self.scheduling_mode):
-            self.shm_verify_action = shared_memory.SharedMemory(create=False, name='verify_action')
-            verify_action_nd_array = np.ndarray(shape=(2 * total_agents), dtype=np.int32, buffer = self.shm_verify_action.buf)
-            self.verify_action_nd_array = verify_action_nd_array[agent_idx * 2: (agent_idx + 1) * 2]
+        self.shm_verify_action = shared_memory.SharedMemory(create=False, name='verify_action')
+        verify_action_nd_array = np.ndarray(shape=(2 * total_agents), dtype=np.int32, buffer = self.shm_verify_action.buf)
+        self.verify_action_nd_array = verify_action_nd_array[agent_idx * 2: (agent_idx + 1) * 2]
 
         self.shm_reward = shared_memory.SharedMemory(create=False, name='result')
-        result_nd_array = np.ndarray(shape=(7 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
-        self.result_nd_array = result_nd_array[agent_idx * 7: (agent_idx + 1) * 7]
+        result_nd_array = np.ndarray(shape=(8 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
+        self.result_nd_array = result_nd_array[agent_idx * 8: (agent_idx + 1) * 8]
 
     def receive_state(self):
         with self.cond_observation:
             while self.observation_nd_array[0] == 0:
                 self.cond_observation.wait(0.001)
-        self.timestamp = self.current_timestamp()
         self.observation_nd_array[0] = 0 
+        self.timestamp = self.current_timestamp()
         # observation_nd_array: crc, tti, cpu, snr, bsr
         self.tti = self.observation_nd_array[1]        
         return self.observation_nd_array[2:4].astype(np.float32) # tti, cpu, snr
@@ -95,21 +93,24 @@ class SrsRanEnv(BaseEnv):
             verify_action = self.verify_action()            
             if (not verify_action):
                 return None, None, True, None
-            crc, decoding_time, tbs, mcs_res, prb_res, _ = self.receive_reward()
+            crc, decoding_time, tbs, mcs_res, prb_res, snr_res, noise_dbm = self.receive_reward()
             reward, _ = super().get_reward(mcs_res, prb_res, crc, decoding_time, tbs)
             cpu, snr = super().get_observation()
-            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu)
+            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu, snr_res / 1000, noise_dbm / 1000)
             result[3]['modified'] = mcs_res != mcs or prb_res != prb            
             result[3]['tti'] = self.tti
             result[3]['hrq'] = self.agent_idx
             result[3]['timestamp'] = self.timestamp
         else:
             mcs, prb = action
-            self.apply_action(mcs, prb)            
-            crc, decoding_time, tbs, mcs, prb, _ = self.receive_reward()
+            self.apply_action(mcs, prb)
+            verify_action = self.verify_action()            
+            if (not verify_action):
+                return None, None, True, None            
+            crc, decoding_time, tbs, mcs_res, prb_res, snr_res, noise_dbm = self.receive_reward()
             cpu, snr = super().get_observation()
-            result = super().get_agent_result('', mcs, prb, crc, decoding_time, tbs, snr, cpu)
-            result[3]['modified'] = False
+            result = super().get_agent_result('', mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu, snr_res / 1000, noise_dbm / 1000)
+            result[3]['modified'] = mcs_res != mcs or prb_res != prb            
             result[3]['tti'] = self.tti
             result[3]['hrq'] = self.agent_idx
             result[3]['timestamp'] = self.timestamp
