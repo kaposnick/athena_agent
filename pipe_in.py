@@ -17,7 +17,7 @@ class Coordinator():
     def __init__(self):
         self.total_agents = 8
         self.verbose = 1
-        self.scheduling_mode = MODE_SCHEDULING_NO
+        self.scheduling_mode = MODE_SCHEDULING_RANDOM
         self.training_mode   = MODE_INFERENCE
 
         # validity byte

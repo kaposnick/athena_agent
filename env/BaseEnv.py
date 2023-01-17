@@ -289,7 +289,9 @@ class BaseEnv(gym.Env):
 
     def translate_action(self, action) -> tuple:
         if (action == 'random'):
-            mcs, prb = self.action_array[np.random.randint(0, len(self.action_array))]
+            tbs_array_idx = np.random.randint(0, len(self.tbs_to_action_array))
+            action_index = int(self.tbs_to_action_array[tbs_array_idx][0][0]) # get the one with the lowest PRB
+            mcs, prb = self.action_array[action_index]
             return int(mcs), int(prb)
         else: return self.fn_action_translation(action)
 
