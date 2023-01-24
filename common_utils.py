@@ -97,9 +97,9 @@ def get_basic_critic_network(tf, num_states, num_actions):
     return critic
 
 cpu_min = 0
-snr_min = 11
+snr_min = 6
 cpu_max = 1000
-snr_max = 30
+snr_max = 35
 def normalize_state(state):
     # cpu, snr1
     state = state.copy()

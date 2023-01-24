@@ -51,8 +51,8 @@ class SrsRanEnv(BaseEnv):
         self.verify_action_nd_array = verify_action_nd_array[agent_idx * 2: (agent_idx + 1) * 2]
 
         self.shm_reward = shared_memory.SharedMemory(create=False, name='result')
-        result_nd_array = np.ndarray(shape=(8 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
-        self.result_nd_array = result_nd_array[agent_idx * 8: (agent_idx + 1) * 8]
+        result_nd_array = np.ndarray(shape=(9 * total_agents), dtype=np.int32, buffer = self.shm_reward.buf)
+        self.result_nd_array = result_nd_array[agent_idx * 9: (agent_idx + 1) * 9]
 
     def receive_state(self):
         with self.cond_observation:
@@ -93,10 +93,10 @@ class SrsRanEnv(BaseEnv):
             verify_action = self.verify_action()            
             if (not verify_action):
                 return None, None, True, None
-            crc, decoding_time, tbs, mcs_res, prb_res, snr_res, noise_dbm = self.receive_reward()
+            crc, decoding_time, tbs, mcs_res, prb_res, snr_res, noise_dbm, snr_custom = self.receive_reward()
             reward, _ = super().get_reward(mcs_res, prb_res, crc, decoding_time, tbs)
             cpu, snr = super().get_observation()
-            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu, snr_res / 1000, noise_dbm / 1000)
+            result = super().get_agent_result(reward, mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu, snr_res / 1000, noise_dbm / 1000, snr_custom / 1000)
             result[3]['modified'] = mcs_res != mcs or prb_res != prb            
             result[3]['tti'] = self.tti
             result[3]['hrq'] = self.agent_idx
@@ -107,9 +107,9 @@ class SrsRanEnv(BaseEnv):
             verify_action = self.verify_action()            
             if (not verify_action):
                 return None, None, True, None            
-            crc, decoding_time, tbs, mcs_res, prb_res, snr_res, noise_dbm = self.receive_reward()
+            crc, decoding_time, tbs, mcs_res, prb_res, snr_res, noise_dbmm, snr_custom = self.receive_reward()
             cpu, snr = super().get_observation()
-            result = super().get_agent_result('', mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu, snr_res / 1000, noise_dbm / 1000)
+            result = super().get_agent_result('', mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu, snr_res / 1000, noise_dbm / 1000, snr_custom / 1000)
             result[3]['modified'] = mcs_res != mcs or prb_res != prb            
             result[3]['tti'] = self.tti
             result[3]['hrq'] = self.agent_idx

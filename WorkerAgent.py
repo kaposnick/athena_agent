@@ -132,7 +132,7 @@ class Actor_Critic_Worker(mp.Process):
                     continue
                 if (self.environment.is_state_valid()):
                     action = np.array([info['mcs'], info['prb']])
-                    reward = np.array([info['crc'], info['decoding_time'], info['snr_decode'], info['noise_decode']])
+                    reward = np.array([info['crc'], info['decoding_time'], info['snr_decode'], info['noise_decode'], info['snr_custom']])
                     self.sample_buffer_queue.put([(state, action, reward)])
         finally:
             print(str(self) + ' -> Exiting...')

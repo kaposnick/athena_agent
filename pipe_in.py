@@ -46,12 +46,12 @@ class Coordinator():
         nd_array[:] = np.full(shape=(2 * self.total_agents), fill_value=0)
 
         try:
-            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (32) * self.total_agents)
+            shm_reward = shared_memory.SharedMemory(create = True,  name = 'result', size = (36) * self.total_agents)
         except Exception:
-            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (32) * self.total_agents)    
+            shm_reward = shared_memory.SharedMemory(create = False, name = 'result', size = (36) * self.total_agents)    
 
-        nd_array = np.ndarray(shape=(8 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
-        nd_array[:] = np.full(shape=(8 * self.total_agents), fill_value=0)                
+        nd_array = np.ndarray(shape=(9 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
+        nd_array[:] = np.full(shape=(9 * self.total_agents), fill_value=0)                
 
         self.config = self.get_environment_config()
         self.processes_started_successfully = mp.Value('i', 0)
@@ -100,8 +100,8 @@ class Coordinator():
             results_file = '/home/naposto/phd/nokia/experiment_mcs_policy/results.csv'
             load_pretrained_weights = True
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
-            actor_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_actor_weights_penalty_0.h5'            
-            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_critic_weights_penalty_0.h5'
+            actor_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_actor_weights_new.h5'            
+            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_critic_weights_new.h5'
 
 
 
@@ -171,7 +171,7 @@ class Coordinator():
     def rcv_return_func(self):
         shm_reward = shared_memory.SharedMemory(create = False,  name = 'result')
         self.reward_nd_array = np.ndarray(
-            shape=(8 * self.total_agents),
+            shape=(9 * self.total_agents),
             dtype= np.int32,
             buffer = shm_reward.buf
         )
@@ -185,7 +185,7 @@ class Coordinator():
                     is_file_open = True
                     print('Opening receive reward socket...')
                     while (True):
-                        content = file_read.read(28)
+                        content = file_read.read(32)
                         if (len(content) <= 0):
                             print('EOF')
                             break
@@ -198,15 +198,16 @@ class Coordinator():
                         prb      = int.from_bytes(content[18:20], "little")
                         snr      = int.from_bytes(content[20:24], "little")
                         noise    = int.from_bytes(content[24:28], "little")
+                        snr_custom = int.from_bytes(content[28:32], "little")
 
-                        result_buffer = np.array([tti, crc, dec_time, dec_bits, mcs, prb, snr, noise], dtype = np.int32)
+                        result_buffer = np.array([tti, crc, dec_time, dec_bits, mcs, prb, snr, noise, snr_custom], dtype = np.int32)
                         agent_idx = tti % self.total_agents
                         if (self.verbose == 1):
                             print('Res {} - {}'.format(agent_idx, result_buffer))
                         cond_reward = self.cond_rewards[agent_idx]
                         result_buffer[0] = 1
                         with cond_reward:
-                            self.reward_nd_array[agent_idx * 8: (agent_idx + 1) * 8] = result_buffer
+                            self.reward_nd_array[agent_idx * 9: (agent_idx + 1) * 9] = result_buffer
                             cond_reward.notify()
             except FileNotFoundError as e:
                 pass
