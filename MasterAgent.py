@@ -362,6 +362,7 @@ class Master_Agent(mp.Process):
     def send_results_thread(self):
         while(True):
             batch_info = self.batch_info_queue.get()
+            print('MasterAgent: Appending new episode')
             self.send_results([batch_info])
 
     def load_initial_weights_if_configured(self):
@@ -413,7 +414,8 @@ class Master_Agent(mp.Process):
             self.load_initial_weights_if_configured()           
             self.publish_weights()
             
-            threading.Thread(target=self.send_results_thread).start()
+            t = threading.Thread(target=self.send_results_thread)
+            t.start()
             self.master_agent_initialized.value = 1
 
             has_entered_inference_mode = False
@@ -425,6 +427,7 @@ class Master_Agent(mp.Process):
                     if (not has_entered_inference_mode) and (self.in_training_mode.value == MODE_INFERENCE):
                         has_entered_inference_mode = True
                         print(str(self) + ' -> Entering inference mode...')
+                        t.join()
                     if (self.in_training_mode.value == MODE_TRAINING):
                         record_list = self.sample_buffer_queue.get(block = True, timeout = 10)
                         state, action, reward = record_list[0] # it used to be a list with only one element 
