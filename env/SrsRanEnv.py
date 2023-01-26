@@ -107,7 +107,7 @@ class SrsRanEnv(BaseEnv):
             verify_action = self.verify_action()            
             if (not verify_action):
                 return None, None, True, None            
-            crc, decoding_time, tbs, mcs_res, prb_res, snr_res, noise_dbmm, snr_custom = self.receive_reward()
+            crc, decoding_time, tbs, mcs_res, prb_res, snr_res, noise_dbm, snr_custom = self.receive_reward()
             cpu, snr = super().get_observation()
             result = super().get_agent_result('', mcs_res, prb_res, crc, decoding_time, tbs, snr, cpu, snr_res / 1000, noise_dbm / 1000, snr_custom / 1000)
             result[3]['modified'] = mcs_res != mcs or prb_res != prb            

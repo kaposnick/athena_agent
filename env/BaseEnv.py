@@ -55,7 +55,7 @@ class BaseEnv(gym.Env):
         if (self.policy_output_format == "mcs_prb_joint"):
             self.mapping_array = []
             for mcs in MCS_SPACE:
-                for prb in PRB_SPACE:
+                for prb in [45]:
                     combo = ( I_MCS_TO_I_TBS[int(mcs)], int(prb) - 1)
                     if combo in PROHIBITED_COMBOS:
                         continue
@@ -132,7 +132,8 @@ class BaseEnv(gym.Env):
         mid = (low + high) // 2
         if (arr[mid] <= x and arr[mid + 1] > x):
             if (x - arr[mid] >= arr[mid + 1] - x):
-                return mid + 1
+                return mid
+                # return mid + 1
             else: return mid
         
         if (arr[mid] < x):
@@ -302,7 +303,7 @@ class BaseEnv(gym.Env):
     def is_state_valid(self) -> bool:
         cpu, snr = self.observation
         is_valid = (cpu >= 0 and cpu <= 3000)
-        is_valid = is_valid & (snr >= 0 and snr <=35)
+        is_valid = is_valid & (snr >= 0 and snr <=80)
         return is_valid
 
     def __str__(self) -> str:
