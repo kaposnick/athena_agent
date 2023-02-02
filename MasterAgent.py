@@ -88,7 +88,7 @@ class Master_Agent(mp.Process):
             stage = 'Creating the neural networks'
             models = [
                 get_basic_actor_network(self.tf, self.tfp, self.state_size), 
-                get_basic_critic_network(self.tf, self.state_size, 1)
+                get_basic_critic_network(self.tf, self.state_size, 2)
             ]
 
             self.optimizer = self.tf.keras.optimizers.Adam(
