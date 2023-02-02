@@ -74,11 +74,11 @@ def get_basic_actor_network(tf, tfp, num_states):
     state_input = keras.Input(shape = (num_states))
     x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (state_input)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    
-    norm_params = layers.Dense(1, kernel_initializer = keras.initializers.HeNormal())(x)
+    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)    
+    norm_params = layers.Dense(2, kernel_initializer = keras.initializers.HeNormal())(x)
     actor = keras.Model(state_input, norm_params)
     return actor
 
@@ -99,7 +99,7 @@ def get_basic_critic_network(tf, num_states, num_actions):
     return critic
 
 cpu_min = 0
-snr_min = 23
+snr_min = 22
 cpu_max = 1000
 snr_max = 46
 def normalize_state(state):
@@ -124,6 +124,14 @@ def normalize_tbsoutput(tbs):
 
 def denormalize_tbs(tbsoutput):
     return tbsoutput * (tbs_max - tbs_min) + tbs_min
+
+mcs_prb_min = np.array([0, 1], dtype=np.float32)
+mcs_prb_max = np.array([24, 45], dtype=np.float32)
+def normalize_mcs_prb(mcs_prb):
+    return (mcs_prb - mcs_prb_min) / (mcs_prb_max - mcs_prb_min)
+
+def denormalize_mcs_prb(denormalized_mcs_prb):
+    return denormalized_mcs_prb * (mcs_prb_max - mcs_prb_min) + mcs_prb_min
 
 if (__name__== '__main__'):
     tf, os, tfp = import_tensorflow('3', False)

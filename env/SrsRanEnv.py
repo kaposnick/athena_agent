@@ -88,7 +88,10 @@ class SrsRanEnv(BaseEnv):
         
     def step(self, action):
         if (self.scheduling_mode == MODE_SCHEDULING_AC or self.scheduling_mode == MODE_SCHEDULING_RANDOM):
-            mcs, prb = super().translate_action(action)
+            if len(action) == 2:
+                mcs, prb = action
+            elif len(action) == 1:
+                mcs, prb = super().translate_action(action)
             self.apply_action(mcs, prb)
             verify_action = self.verify_action()            
             if (not verify_action):

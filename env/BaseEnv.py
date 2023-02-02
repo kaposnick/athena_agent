@@ -19,7 +19,7 @@ PRB_SPACE = np.array(
                       20, 24, 25, 27, 
                       30, 32, 36, 40, 45], dtype = np.float16)
 # PRB_SPACE = np.array([45], dtype=np.float16)
-MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],  dtype=np.float16)  
+MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],  dtype=np.float16)  
 I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
 
@@ -55,7 +55,7 @@ class BaseEnv(gym.Env):
         if (self.policy_output_format == "mcs_prb_joint"):
             self.mapping_array = []
             for mcs in MCS_SPACE:
-                for prb in [45]:
+                for prb in PRB_SPACE:
                     combo = ( I_MCS_TO_I_TBS[int(mcs)], int(prb) - 1)
                     if combo in PROHIBITED_COMBOS:
                         continue
@@ -87,6 +87,7 @@ class BaseEnv(gym.Env):
                 tbs_list.append(np.array([action_idx, x['prb'], x['mcs']]))
             self.tbs_len = len(self.tbs_array)
             
+            self.mcs_prb_array = np.array([np.array([x[0][2], x[0][1]]) for x in self.tbs_to_action_array])
             self.action_space = spaces.Discrete(len(self.action_array))
             self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
             self.fn_calculate_mean = self.fn_mcs_prb_joint_mean_calculation

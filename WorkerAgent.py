@@ -3,7 +3,7 @@ import numpy as np
 import random
 from OUActionNoise import OUActionNoise
 from env.BaseEnv import BaseEnv
-from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state, normalize_tbsoutput, denormalize_tbs
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state, normalize_mcs_prb, denormalize_mcs_prb
 from Config import Config
 import time
 import copy
@@ -66,24 +66,26 @@ class Actor_Critic_Worker(mp.Process):
         shm, weights_array = get_shared_memory_ref(size, model_dtype, memory_name)
         return shm, weights_array
 
-    def initiate_models(self):
+    def initiate_models(self, associate_with_master=True):
         try:
             stage = 'Creating the neural networks'
             
             models = [
                 get_basic_actor_network(self.tf, self.tfp, self.state_size), 
-                get_basic_critic_network(self.tf, self.state_size, 1)
+                get_basic_critic_network(self.tf, self.state_size, 2)
             ]
 
             stage = 'Actor memory reference creation'
             self.actor = models[0]
-            self.shm_actor, self.np_array_actor = self.get_shared_memory_reference(self.actor, self.actor_memory_name)
-            self.weights_actor = map_weights_to_shared_memory_buffer(self.actor.get_weights(), self.np_array_actor)
+            if (associate_with_master):
+                self.shm_actor, self.np_array_actor = self.get_shared_memory_reference(self.actor, self.actor_memory_name)
+                self.weights_actor = map_weights_to_shared_memory_buffer(self.actor.get_weights(), self.np_array_actor)
 
             stage = 'Action-value critic memory reference creation'
             self.critic = models[1]
-            self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.critic, self.critic_memory_name)
-            self.weights_critic = map_weights_to_shared_memory_buffer(self.critic.get_weights(), self.np_array_critic)
+            if (associate_with_master):
+                self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.critic, self.critic_memory_name)
+                self.weights_critic = map_weights_to_shared_memory_buffer(self.critic.get_weights(), self.np_array_critic)
         except Exception as e:
             self.print('Stage: {}, Error initiating models: {}'.format(stage, e))
             raise e
@@ -138,14 +140,15 @@ class Actor_Critic_Worker(mp.Process):
             print(str(self) + ' -> Exiting...')
 
 
-    def execute_in_schedule_ac_mode(self):
+    def execute_in_schedule_ac_mode(self, associate_with_master=True):
         self.tf, _, self.tfp = import_tensorflow('3', True)
         self.set_process_seeds(self.worker_num)
         try:
-            self.initiate_models()
+            self.initiate_models(associate_with_master=associate_with_master)
             self.environment.setup(self.worker_num, self.total_workers)
 
-            self.update_weights()
+            if (associate_with_master):
+                self.update_weights()
             
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
@@ -159,10 +162,12 @@ class Actor_Critic_Worker(mp.Process):
                     self.update_weights()
                 
                 environment_state = self.environment.reset()
+                if (environment_state[1] == 23):
+                    environment_state[1] = 22
                 state  = normalize_state(environment_state)
-                action_idx, action, mu, sigma = self.pick_action_from_embedding_table(state)
+                action, mcs, prb = self.pick_action_from_embedding_table(state)
 
-                _, reward, _, info = self.environment.step([action_idx])
+                _, reward, _, info = self.environment.step([mcs, prb])
                 if (reward is None):
                     # This happens in cases where the srsRAN doesn't apply the decided action
                     # As a result, no reward is being returned from the environment, and we 
@@ -170,7 +175,7 @@ class Actor_Critic_Worker(mp.Process):
                     # to learn from this experience.
                     self.print('Action not applied.. skipping')
                     continue
-                if (info['modified']):
+                if (info['modified'] and False):
                     # This may happen in cases where the srsRAN chooses to allocate fewer PRBs
                     # than the decides ones. IN this case we don't want to record this sample
                     # on the record file, and we don't want the MasterAgent to learn from this
@@ -181,36 +186,42 @@ class Actor_Critic_Worker(mp.Process):
                 if (self.environment.is_state_valid()):
                     if (self.isin_training_mode()):
                         self.sample_buffer_queue.put([(state, action, reward)])                
-                    info['mu'] = mu
-                    info['sigma'] = sigma
+                    info['mu'] = mcs
+                    info['sigma'] = prb
                     self.batch_info_queue.put(info)
                 
         finally:
             print(str(self) + ' -> Exiting...')
 
     def isin_training_mode(self):
-        return self.in_training_mode.value == MODE_TRAINING
+        return self.scheduling_mode == MODE_SCHEDULING_AC and self.in_training_mode.value == MODE_TRAINING
 
     def run(self) -> None:
         if (self.scheduling_mode == MODE_SCHEDULING_NO):
-            self.execute_in_collecting_stats_mode()
+            # self.execute_in_collecting_stats_mode()
+            self.execute_in_schedule_ac_mode(associate_with_master=False)
         elif (self.scheduling_mode == MODE_SCHEDULING_AC):
             self.execute_in_schedule_ac_mode()
         elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):
             self.execute_in_schedule_random_mode()
 
-    def pick_action_from_embedding_table(self, state: np.array):
-        actor_input = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
-        actor_output = self.actor(actor_input)[0]
-        actor_output = denormalize_tbs(actor_output)
+    def pick_action_from_embedding_table(self, state: np.array, k = 9 ):
+        context = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
 
-        if (self.isin_training_mode()):
-            tbs_hat = actor_output + np.random(0, 1000)
-        else:
-            tbs_hat = actor_output
+        mcs_prb_array      = self.environment.mcs_prb_array
+        mcs_prb_normalized = self.actor(context)[0]
+        mcs_prb            = denormalize_mcs_prb(mcs_prb_normalized)
+        l2_norms           = np.linalg.norm(mcs_prb - mcs_prb_array, axis = 1)
+        partition          = np.argpartition(l2_norms, k)
+        k_closest_mcs_prb  = mcs_prb_array[partition[:k]]
+        k_closest_mcs_prb_normalized = normalize_mcs_prb(k_closest_mcs_prb)
+        context_extended   = np.broadcast_to(context, (k, context.shape[1]))
+        q_values           = self.critic([context_extended, k_closest_mcs_prb_normalized])
+        argmin_q_value     = np.argmax(q_values)
+
+        closest_mcs_prb    = k_closest_mcs_prb[argmin_q_value]
         
-        tbs_idx, tbs = self.environment.get_closest_actions(tbs_hat)
-        return tbs_idx, normalize_tbsoutput(tbs), actor_output, 0
+        return str(mcs_prb_normalized), *[int(x) for x in closest_mcs_prb]
 
     def print(self, string_to_print, end = None):
         if ((self.worker_num == 4 and False) or True):
