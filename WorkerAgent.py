@@ -198,8 +198,8 @@ class Actor_Critic_Worker(mp.Process):
 
     def run(self) -> None:
         if (self.scheduling_mode == MODE_SCHEDULING_NO):
-            # self.execute_in_collecting_stats_mode()
-            self.execute_in_schedule_ac_mode(associate_with_master=False)
+            self.execute_in_collecting_stats_mode()
+            # self.execute_in_schedule_ac_mode(associate_with_master=False)
         elif (self.scheduling_mode == MODE_SCHEDULING_AC):
             self.execute_in_schedule_ac_mode()
         elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):

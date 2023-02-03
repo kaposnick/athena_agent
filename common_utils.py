@@ -78,7 +78,7 @@ def get_basic_actor_network(tf, tfp, num_states):
     x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)    
-    norm_params = layers.Dense(2, kernel_initializer = keras.initializers.HeNormal())(x)
+    norm_params = layers.Dense(2, activation='sigmoid', kernel_initializer = keras.initializers.HeNormal())(x)
     actor = keras.Model(state_input, norm_params)
     return actor
 
@@ -137,9 +137,9 @@ if (__name__== '__main__'):
     tf, os, tfp = import_tensorflow('3', False)
 
     actor = get_basic_actor_network(tf, tfp, 2)
-    actor.load_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_weights_snr_custom.h5')
-    critic = get_basic_critic_network(tf, 2, 1)
-    critic.load_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_weights_snr_custom.h5')
+    actor.load_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_weights_snr_custom_multiprb_extended_favor_.1.h5')
+    critic = get_basic_critic_network(tf, 2, 2)
+    critic.load_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_weights_snr_custom_multiprb_extended_favor_.1.h5')
     state = np.array([0, 31], dtype = np.float32)
     # action = np.array([0.5], dtype = np.float32)
     state = normalize_state(state)
