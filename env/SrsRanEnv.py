@@ -62,7 +62,9 @@ class SrsRanEnv(BaseEnv):
         self.timestamp = self.current_timestamp()
         # observation_nd_array: crc, tti, cpu, snr, bsr
         self.tti = self.observation_nd_array[1]        
-        return self.observation_nd_array[2:4].astype(np.float32) # tti, cpu, snr
+        cpu, snr = self.observation_nd_array[2:4].astype(np.float32)
+        return np.array([cpu, snr / 1000], dtype=np.float32)
+        # return self.observation_nd_array[2:4].astype(np.float32) # tti, cpu, snr
 
     def apply_action(self, mcs, prb):
         with self.cond_action:
@@ -91,7 +93,7 @@ class SrsRanEnv(BaseEnv):
             if len(action) == 2:
                 mcs, prb = action
             elif len(action) == 1:
-                mcs, prb = super().translate_action(action)
+                mcs, prb = super().translate_action(action[0])
             self.apply_action(mcs, prb)
             verify_action = self.verify_action()            
             if (not verify_action):

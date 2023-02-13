@@ -19,7 +19,7 @@ PRB_SPACE = np.array(
                       20, 24, 25, 27, 
                       30, 32, 36, 40, 45], dtype = np.float16)
 # PRB_SPACE = np.array([45], dtype=np.float16)
-MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],  dtype=np.float16)  
+MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],  dtype=np.float16)  
 I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
 
@@ -50,7 +50,8 @@ class BaseEnv(gym.Env):
 
         import json
         with open(tbs_table_path) as tbs_json:
-            self.tbs_table = json.load(tbs_json)  
+            self.tbs_table = json.load(tbs_json)
+        self.random_action_idx = 0
 
         if (self.policy_output_format == "mcs_prb_joint"):
             self.mapping_array = []
@@ -265,7 +266,7 @@ class BaseEnv(gym.Env):
 
     def fn_mcs_prb_joint_action_translation(self, action) -> tuple:
         # in this case action is [action_idx]
-        action_idx = action[0]
+        action_idx = action
         assert action_idx >= 0 and action_idx < len(self.action_array), 'Action {} not in range'.format(action_idx)
         mcs, prb = self.action_array[action_idx]
         return int(mcs), int(prb)
@@ -292,9 +293,12 @@ class BaseEnv(gym.Env):
 
     def translate_action(self, action) -> tuple:
         if (action == 'random'):
-            tbs_array_idx = np.random.randint(0, len(self.tbs_to_action_array))
-            action_index = int(self.tbs_to_action_array[tbs_array_idx][0][0]) # get the one with the lowest PRB
-            mcs, prb = self.action_array[action_index]
+            # tbs_array_idx = np.random.randint(0, len(self.tbs_to_action_array))
+            # action_index = int(self.tbs_to_action_array[tbs_array_idx][0][0]) # get the one with the lowest PRB
+            # mcs, prb = self.action_array[self.random_action_idx]
+            # self.random_action_idx = (self.random_action_idx + 1) % len(self.action_array)
+            action_array_idx = np.random.randint(0, len(self.action_array))
+            mcs, prb = self.action_array[action_array_idx]
             return int(mcs), int(prb)
         else: return self.fn_action_translation(action)
 

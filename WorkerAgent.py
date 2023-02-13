@@ -7,6 +7,7 @@ from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING
 from Config import Config
 import time
 import copy
+from scipy.spatial import distance
 
 class Actor_Critic_Worker(mp.Process):
     def __init__(self, 
@@ -101,7 +102,6 @@ class Actor_Critic_Worker(mp.Process):
             self.successfully_started_worker.value += 1
         
         while (True):
-            self.print('Reading state')
             state = self.environment.reset()
             _, reward, _, info = self.environment.step((24, 45))
             if (reward is None):
@@ -112,17 +112,18 @@ class Actor_Critic_Worker(mp.Process):
             self.batch_info_queue.put(info)
 
     def execute_in_schedule_random_mode(self):
+        self.tf, _, self.tfp = import_tensorflow('3', True)
         self.set_process_seeds(self.worker_num)
         try:
+            self.initiate_models(associate_with_master=False)
             self.environment.setup(self.worker_num, self.total_workers)        
             with self.successfully_started_worker.get_lock():
                 self.successfully_started_worker.value += 1
             while (True):
                 state = self.environment.reset()
-                action_idx = 533 # mcs = 22, prb = 45
-                action = [action_idx]
+                action,mcs, prb = self.pick_action_from_embedding_table(state)
                 action = 'random'
-                _, reward, _, info = self.environment.step(action)
+                _, reward, _, info = self.environment.step([action])
                 if (reward is None):
                     continue
                 if (info['modified']):
@@ -156,17 +157,13 @@ class Actor_Critic_Worker(mp.Process):
             self.ep_ix = 0
             while (True):
                 self.ep_ix += 1
-                if (self.ep_ix % 1 == 0):
-                    self.print('Episode {}'.format(self.ep_ix + 1))
-                if (self.isin_training_mode() and (self.ep_ix % self.local_update_period == 0)):
-                    self.update_weights()
+                # if (self.isin_training_mode() and (self.ep_ix % self.local_update_period == 0)):
+                #     self.update_weights()
                 
                 environment_state = self.environment.reset()
-                if (environment_state[1] == 23):
-                    environment_state[1] = 22
+                environment_state[1] = np.floor(environment_state[1])
                 state  = normalize_state(environment_state)
                 action, mcs, prb = self.pick_action_from_embedding_table(state)
-
                 _, reward, _, info = self.environment.step([mcs, prb])
                 if (reward is None):
                     # This happens in cases where the srsRAN doesn't apply the decided action
@@ -198,12 +195,14 @@ class Actor_Critic_Worker(mp.Process):
 
     def run(self) -> None:
         if (self.scheduling_mode == MODE_SCHEDULING_NO):
-            self.execute_in_collecting_stats_mode()
-            # self.execute_in_schedule_ac_mode(associate_with_master=False)
+            # self.execute_in_collecting_stats_mode()
+            self.execute_in_schedule_ac_mode(associate_with_master=False)
         elif (self.scheduling_mode == MODE_SCHEDULING_AC):
             self.execute_in_schedule_ac_mode()
         elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):
             self.execute_in_schedule_random_mode()
+
+    
 
     def pick_action_from_embedding_table(self, state: np.array, k = 9 ):
         context = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
@@ -211,8 +210,14 @@ class Actor_Critic_Worker(mp.Process):
         mcs_prb_array      = self.environment.mcs_prb_array
         mcs_prb_normalized = self.actor(context)[0]
         mcs_prb            = denormalize_mcs_prb(mcs_prb_normalized)
-        l2_norms           = np.linalg.norm(mcs_prb - mcs_prb_array, axis = 1)
+
+        l2_norms           = np.zeros(shape=(len(mcs_prb_array)))
+        weights = np.array([1, 1])
+        for i, mcs_prb_comb in enumerate(mcs_prb_array):
+            l2_norms[i] = distance.euclidean(mcs_prb, mcs_prb_comb, weights)
+
         partition          = np.argpartition(l2_norms, k)
+
         k_closest_mcs_prb  = mcs_prb_array[partition[:k]]
         k_closest_mcs_prb_normalized = normalize_mcs_prb(k_closest_mcs_prb)
         context_extended   = np.broadcast_to(context, (k, context.shape[1]))

@@ -144,7 +144,7 @@ class A3CAgent(BaseAgent):
         if (processes_started_successfully is not None):
                 processes_started_successfully.value = 1
         import time
-        seconds = 28880
+        seconds = 172800
         print('A3C Agent going to sleep for {} seconds...'.format(seconds))
         time.sleep(seconds)
         print('A3C Agent woke up.. Finalizing master agent thread')
