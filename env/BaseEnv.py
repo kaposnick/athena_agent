@@ -18,6 +18,9 @@ PRB_SPACE = np.array(
                       10, 12, 15, 16, 18, 
                       20, 24, 25, 27, 
                       30, 32, 36, 40, 45], dtype = np.float16)
+REVERSE_PRB_SPACE = {
+    int(prb): i for i, prb in enumerate(PRB_SPACE)
+}
 # PRB_SPACE = np.array([45], dtype=np.float16)
 MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],  dtype=np.float16)  
 I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
@@ -70,7 +73,9 @@ class BaseEnv(gym.Env):
 
             self.mapping_array = sorted(self.mapping_array, key = lambda el: (el['tbs'], el['mcs']))
             self.action_array = [np.array([x['mcs'], x['prb']]) for x in self.mapping_array] # sort by tbs/mcs
-            
+            self.action_array = np.array(self.action_array)
+            self.action_prb_index_array = [np.array([x['mcs'], REVERSE_PRB_SPACE[x['prb']]]) for x in self.mapping_array]
+
             self.tbs_array = []
             self.tbs_to_action_array = []
 
@@ -163,7 +168,7 @@ class BaseEnv(gym.Env):
         if (self.policy_output_format == "mcs_prb_joint"):
             columns = ['reward_mean', 'mu_mean', 'sigma_mean', 'crc_ok', 
                     'dec_time_ok_ratio', 'dec_time_ok_mean', 'dec_time_ok_std', 'dec_time_ko_mean', 'dec_time_ko_std', 
-                    'throughput_ok_mean', 'throughput_ok_std', 'snr', 'cpu', 'snr_decode', 'noise_decode', 'snr_decode_custom']
+                    'throughput_ok_mean', 'throughput_ok_std', 'snr', 'cpu', 'gain', 'snr_decode', 'noise_decode', 'snr_decode_custom']
             return columns
         else: raise Exception("Not supported policy output format")
 
@@ -230,6 +235,7 @@ class BaseEnv(gym.Env):
                      { 'period': 1, 'value': np.round(throughput_ok_std , 3)}, 
                      { 'period': 1, 'value': np.round(snr_mean, 3) },
                      { 'period': 1, 'value': np.round(cpu_mean, 3) },
+                     { 'period': 1, 'value': np.round(infos[0]['gain'], 3)},
                      { 'period': 1, 'value': np.round(infos[0]['snr_decode'], 3)},
                      { 'period': 1, 'value': np.round(infos[0]['noise_decode'], 3)}, 
                      { 'period': 1, 'value': np.round(infos[0]['snr_custom'], 3)}]

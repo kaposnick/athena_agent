@@ -161,7 +161,7 @@ class Actor_Critic_Worker(mp.Process):
                 #     self.update_weights()
                 
                 environment_state = self.environment.reset()
-                environment_state[1] = np.floor(environment_state[1])
+                # environment_state[1] = np.floor(environment_state[1])
                 state  = normalize_state(environment_state)
                 action, mcs, prb = self.pick_action_from_embedding_table(state)
                 _, reward, _, info = self.environment.step([mcs, prb])
@@ -207,7 +207,7 @@ class Actor_Critic_Worker(mp.Process):
     def pick_action_from_embedding_table(self, state: np.array, k = 9 ):
         context = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
 
-        mcs_prb_array      = self.environment.mcs_prb_array
+        mcs_prb_array      = self.environment.action_array
         mcs_prb_normalized = self.actor(context)[0]
         mcs_prb            = denormalize_mcs_prb(mcs_prb_normalized)
 

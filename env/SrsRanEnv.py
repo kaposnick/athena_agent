@@ -39,8 +39,8 @@ class SrsRanEnv(BaseEnv):
     def setup(self, agent_idx, total_agents):
         super().setup(agent_idx, total_agents)
         self.shm_observation = shared_memory.SharedMemory(create=False, name='observation')
-        observation_nd_array = np.ndarray(shape=(5 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
-        self.observation_nd_array = observation_nd_array[agent_idx * 5: (agent_idx+1)*5] # crc, tti, cpu, snr, bsr
+        observation_nd_array = np.ndarray(shape=(6 * total_agents), dtype=np.int32, buffer=self.shm_observation.buf)
+        self.observation_nd_array = observation_nd_array[agent_idx * 6: (agent_idx+1)*6] # crc, tti, cpu, snr, bsr
 
         self.shm_action = shared_memory.SharedMemory(create=False, name='action')
         action_nd_array = np.ndarray(shape=(3 * total_agents), dtype=np.int32, buffer = self.shm_action.buf)
@@ -60,9 +60,10 @@ class SrsRanEnv(BaseEnv):
                 self.cond_observation.wait(0.001)
         self.observation_nd_array[0] = 0 
         self.timestamp = self.current_timestamp()
-        # observation_nd_array: crc, tti, cpu, snr, bsr
+        # observation_nd_array: crc, tti, cpu, snr, bsr, gain
         self.tti = self.observation_nd_array[1]        
         cpu, snr = self.observation_nd_array[2:4].astype(np.float32)
+        self.gain = self.observation_nd_array[5]
         return np.array([cpu, snr / 1000], dtype=np.float32)
         # return self.observation_nd_array[2:4].astype(np.float32) # tti, cpu, snr
 
@@ -106,6 +107,7 @@ class SrsRanEnv(BaseEnv):
             result[3]['tti'] = self.tti
             result[3]['hrq'] = self.agent_idx
             result[3]['timestamp'] = self.timestamp
+            result[3]['gain'] = self.gain
         else:
             mcs, prb = action
             self.apply_action(mcs, prb)
@@ -119,6 +121,7 @@ class SrsRanEnv(BaseEnv):
             result[3]['tti'] = self.tti
             result[3]['hrq'] = self.agent_idx
             result[3]['timestamp'] = self.timestamp
+            result[3]['gain'] = self.gain
         return result
         
 

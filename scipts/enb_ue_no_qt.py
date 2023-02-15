@@ -21,10 +21,20 @@ from gnuradio import zeromq
 
 BETA_FIFO = '/tmp/beta_fifo'
 
+# gain_levels = [
+#         1.0,  .8,  .6, .5,   .4, .35,  .3, .25, .22, .20, 
+#         .18, .16, .14, .12, .10, .09, .08, .07, .06, .05]
 gain_levels = [
-        1.0,  .8,  .6, .5,   .4, .35,  .3, .25, .22, .20, 
-        .18, .16, .14, .12, .10, .09, .08, .07, .06, .05]
+1.0,  .8,  .6, .5,   .4, .35,  .3, .25, .22, .20, 
+.18, .16, .14, .12, .10, .08, .06]
 gain_level_duration = 3
+total_loops = 500
+
+# gain_level_duration = 30
+# gain_levels = [
+# 1.0,  .8,  .6, .5,   .4, .35,  .3, .28, .27, .26, .25, .24, .23, .22, .21, .20, .19,
+# .18, .17, .16, .15, .14, .13, .12, .11, .10, .09, .08, .07, .06]
+# gain_levels = [1, 1, 1, 1]
 # gain_levels = [1.0, .20, .05]
 congestion_levels = [
     0, 200, 400, 600, 800, 1000
@@ -41,7 +51,7 @@ class intra_enb(gr.top_block):
         # Variables
         ##################################################
         self.noise_level_ue1 = noise_level_ue1 = 0.01
-        self.multiply_level_ue1 = multiple_level_ue1 = 1
+        self.ul_gain_level = self.dl_gain_level = 1        
 
         ##################################################
         # Blocks
@@ -50,7 +60,8 @@ class intra_enb(gr.top_block):
         self.ue_tx_port = zeromq.req_source(gr.sizeof_gr_complex, 1, 'tcp://localhost:2001', 100, False, -1)
         self.ue_rx_port = zeromq.rep_sink(gr.sizeof_gr_complex, 1, 'tcp://*:2000', 100, False, -1)
         self.enb_rx_port = zeromq.rep_sink(gr.sizeof_gr_complex, 1, 'tcp://*:2100', 100, False, -1)
-        self.multiplier = blocks.multiply_const_cc(multiple_level_ue1)
+        self.multiplier_ul = blocks.multiply_const_cc(self.ul_gain_level)
+        self.multiplier_dl = blocks.multiply_const_cc(self.dl_gain_level)
         self.uplink = channels.awgn_model(
             noise_voltage=noise_level_ue1,
             noise_seed=0)
@@ -65,11 +76,12 @@ class intra_enb(gr.top_block):
         ##################################################
         # Connections
         ##################################################
-        self.connect((self.ue_tx_port, 0), (self.multiplier, 0))
-        self.connect((self.multiplier, 0), (self.uplink, 0))
+        self.connect((self.ue_tx_port, 0), (self.multiplier_ul, 0))
+        self.connect((self.multiplier_ul, 0), (self.uplink, 0))
         self.connect((self.uplink, 0), (self.enb_rx_port, 0))
         
-        self.connect((self.enb_tx_port, 0), (self.downlink, 0))
+        self.connect((self.enb_tx_port, 0), (self.multiplier_dl, 0))
+        self.connect((self.multiplier_dl, 0), (self.downlink, 0))
         self.connect((self.downlink, 0), (self.ue_rx_port, 0))
 
     def get_noise_level_ue1(self):
@@ -82,9 +94,10 @@ class intra_enb(gr.top_block):
         self.downlink.set_noise_voltage(self.noise_level_ue1)
 
     def set_multiply_level_ue1(self, multiply_level_ue1):
-        # print('Changing multiply level ue1 to {}'.format(multiply_level_ue1))
-        self.multiply_level_ue1 = multiply_level_ue1
-        self.multiplier.set_k(self.multiply_level_ue1)
+        self.ul_gain_level = multiply_level_ue1
+        self.dl_gain_level = multiply_level_ue1
+        self.multiplier_ul.set_k(self.ul_gain_level)
+        self.multiplier_dl.set_k(self.dl_gain_level)
 
 import time
 import numpy as np
@@ -96,13 +109,18 @@ def automated_monitoring_thread(tb):
     while (not is_file_open):
         try:
             with open(BETA_FIFO, mode = 'wb') as file_write:
+                is_file_open = True
                 print('Opening beta fifo socket successful. Going to sleep')                
                 time.sleep(10) # this sleep is necessary as the echo_to_cpuset and the iperf startup scripts are initiated    
+                loops = 0
                 while (True):
+                    if (current_cpu_level_idx == 0):
+                        print('Loop {}/{}'.format(loops+1, total_loops))
                     # iterate through the CPU congestion levels (outer loop - slower)
                     congestion_level = congestion_levels[current_cpu_level_idx]
                     congestion_level_bytes = congestion_level.to_bytes(4, byteorder='little')
-                    file_write.write(congestion_level_bytes)
+                    gain_level_byte = int(0).to_bytes(2, byteorder='little')
+                    file_write.write(congestion_level_bytes + gain_level_byte)
                     file_write.flush()                    
                     print('Setting CPU Congestion level {}'.format(congestion_level))
 
@@ -110,8 +128,12 @@ def automated_monitoring_thread(tb):
                     direction = 1
                     hit_low_snr_first_time = True
                     while (1):
+                        # tb.set_multiply_level_ue1(gain_levels[len(gain_levels) // 2])
                         tb.set_multiply_level_ue1(gain_levels[current_gain_level_idx])
-                        print('Setting UE Gain level {}'.format(gain_levels[current_gain_level_idx]))
+                        current_gain_level_bytes = (int(gain_levels[current_gain_level_idx]* 1000)).to_bytes(2, byteorder='little')
+                        file_write.write(congestion_level_bytes + current_gain_level_bytes)
+                        file_write.flush()
+                        # print('Setting UE Gain level {}'.format(gain_levels[current_gain_level_idx]))
                         time.sleep(gain_level_duration)
                         if (current_gain_level_idx + direction == len(gain_levels) or
                             current_gain_level_idx + direction == -1):
@@ -123,12 +145,17 @@ def automated_monitoring_thread(tb):
                             direction = -direction
                         
                         current_gain_level_idx += direction
-                    
+                    # break
                     current_cpu_level_idx += 1
                     current_cpu_level_idx %= len(congestion_levels)
+                    if (current_cpu_level_idx == 0):
+                        loops += 1
+                        if (loops == total_loops):
+                            break
         except FileNotFoundError as e:
             print('error')
-            pass
+        finally:
+            print('Gracefully exiting...')
 
 def automated_cpu_level_thread():
     print('Started CPU occupancy thread...', end='')
@@ -221,8 +248,8 @@ def main(top_block_cls=intra_enb, options=None):
     t2 = threading.Thread(target=automated_monitoring_thread(tb,))
     
     t2.start()
-    # t2.join()
-    tb.wait()
+    t2.join()
+    # tb.wait()
 
 
 if __name__ == '__main__':

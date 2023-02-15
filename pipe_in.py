@@ -23,12 +23,12 @@ class Coordinator():
         # validity byte
         # observation is: snr, beta, bsr all are integers32
         try:
-            shm_observation = shared_memory.SharedMemory(create = True,  name = 'observation', size = (20) * self.total_agents)
+            shm_observation = shared_memory.SharedMemory(create = True,  name = 'observation', size = (24) * self.total_agents)
         except Exception:
-            shm_observation = shared_memory.SharedMemory(create = False, name = 'observation', size = (20) * self.total_agents)
+            shm_observation = shared_memory.SharedMemory(create = False, name = 'observation', size = (24) * self.total_agents)
 
-        nd_array = np.ndarray(shape=(5 * self.total_agents), dtype=np.int32, buffer=shm_observation.buf)
-        nd_array[:] = np.full(shape=(5 * self.total_agents), fill_value=0)
+        nd_array = np.ndarray(shape=(6 * self.total_agents), dtype=np.int32, buffer=shm_observation.buf)
+        nd_array[:] = np.full(shape=(6 * self.total_agents), fill_value=0)
 
         try:
             shm_action = shared_memory.SharedMemory(create = True,  name = 'action', size = (12) * self.total_agents)
@@ -100,8 +100,8 @@ class Coordinator():
             results_file = '/home/naposto/phd/nokia/experiment_mcs_policy/results.csv'
             load_pretrained_weights = True
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
-            actor_pretrained_weights_path =   '/home/naposto/phd/nokia/agents/model/ddpg_actor_weights_new_8.h5'
-            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_critic_weights_new_8.h5'
+            actor_pretrained_weights_path =   '/home/naposto/phd/nokia/ddpg_new/actor_perc_80.h5'
+            critic_pretrained_weights_path = '/home/naposto/phd/nokia/ddpg_new/critic_perc_80.h5'
 
 
 
@@ -220,7 +220,7 @@ class Coordinator():
         shm_verify_action = shared_memory.SharedMemory(create = False, name = 'verify_action')
 
         self.observation_nd_array = np.ndarray(
-            shape=(5 * self.total_agents), 
+            shape=(6 * self.total_agents), 
             dtype= np.int32, 
             buffer = shm_observation.buf)
 
@@ -261,17 +261,18 @@ class Coordinator():
                                         rnti = int.from_bytes(content[2:4], "little")
                                         bsr =  int.from_bytes(content[4:8], "little")
                                         snr =  int.from_bytes(content[8:12], "little", signed = True)
-                                        beta = int.from_bytes(content[12:], "little")
+                                        beta = int.from_bytes(content[12:14], "little")
+                                        gain = int.from_bytes(content[14:], "little")
                                         
                                         agent_idx = tti % self.total_agents
-                                        observation = np.array([1, tti, beta, snr, bsr], dtype = np.int32)
+                                        observation = np.array([1, tti, beta, snr, bsr, gain], dtype = np.int32)
                                         if (self.verbose == 1):
                                             print('Obs {} - {}'.format(agent_idx, observation))
                                         cond_observation   = self.cond_observations[agent_idx]
                                         cond_action        = self.cond_actions[agent_idx]
 
                                         with cond_observation:
-                                            self.observation_nd_array[agent_idx * 5: (agent_idx + 1) * 5] = observation
+                                            self.observation_nd_array[agent_idx * 6: (agent_idx + 1) * 6] = observation
                                             cond_observation.notify()
 
                                         with cond_action:
