@@ -135,7 +135,7 @@ class Actor_Critic_Worker(mp.Process):
                     continue
                 if (self.environment.is_state_valid()):
                     action = np.array([info['mcs'], info['prb']])
-                    reward = np.array([info['crc'], info['decoding_time'], info['snr_decode'], info['noise_decode'], info['snr_custom']])
+                    reward = np.array([info['crc'], info['decoding_time'], info['snr_decode'], info['noise_decode'], info['snr_custom'], info['gain']])
                     self.sample_buffer_queue.put([(state, action, reward)])
         finally:
             print(str(self) + ' -> Exiting...')
@@ -162,7 +162,9 @@ class Actor_Critic_Worker(mp.Process):
                 
                 environment_state = self.environment.reset()
                 # environment_state[1] = np.floor(environment_state[1])
-                state  = normalize_state(environment_state)
+                state = environment_state.copy()
+                state[1] = state[1] - 1
+                state  = normalize_state(state)
                 action, mcs, prb = self.pick_action_from_embedding_table(state)
                 _, reward, _, info = self.environment.step([mcs, prb])
                 if (reward is None):

@@ -88,7 +88,7 @@ def get_basic_critic_network(tf, num_states, num_actions):
     state_input = keras.Input(shape = (num_states))
     action_input = keras.Input(shape = (num_actions))
     x = layers.Concatenate()([state_input, action_input])
-    x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
+    x = layers.Dense(16, activation = 'relu', kernel_initializer     = keras.initializers.HeNormal()) (x)
     x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
     x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)

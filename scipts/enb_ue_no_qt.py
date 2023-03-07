@@ -28,7 +28,7 @@ gain_levels = [
 1.0,  .8,  .6, .5,   .4, .35,  .3, .25, .22, .20, 
 .18, .16, .14, .12, .10, .08, .06]
 gain_level_duration = 3
-total_loops = 500
+total_loops = 10
 
 # gain_level_duration = 30
 # gain_levels = [
@@ -38,6 +38,9 @@ total_loops = 500
 # gain_levels = [1.0, .20, .05]
 congestion_levels = [
     0, 200, 400, 600, 800, 1000
+                    ]
+congestion_levels = [
+    0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000
                     ]
 # congestion_levels = [200]
 congestion_level_duration = gain_level_duration * len(gain_levels) * 2
