@@ -22,7 +22,7 @@ REVERSE_PRB_SPACE = {
     int(prb): i for i, prb in enumerate(PRB_SPACE)
 }
 # PRB_SPACE = np.array([45], dtype=np.float16)
-MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27],  dtype=np.float16)  
+MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],  dtype=np.float16)  
 I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
 
