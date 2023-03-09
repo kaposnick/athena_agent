@@ -38,8 +38,13 @@ gain_levels = [
     .5,   .4, .35,  .3, .25, .22, .20, 
     .18, .16, .14, .12
 ]
+
+gain_levels = [
+    .5, .5, .5, .12,.12,.12, .5, .5, .5
+]
+
 gain_level_duration = 3
-total_loops = 5
+total_loops = 2
 
 congestion_levels = [
     0, 200, 400, 600, 800, 1000
@@ -55,7 +60,7 @@ gain_operating = 1.0
 window_length = 100
 
 target_throughput = 13
-time_window       = 66
+time_window       = 3
 
 percentile        = 1
 func_percentile   = [np.percentile, [percentile]]
@@ -271,14 +276,26 @@ import queue
 from queue import Queue
 
 stop = False
+threads_ready_counter = 0
+threads_ready_lock = threading.Lock()
 
-def orchestrator_trigger(_queue, lock):    
+def wait_for_threads():
+    with threads_ready_lock:
+        global threads_ready_counter
+        threads_ready_counter += 1
+        print('Ready {}/{}'.format(threads_ready_counter, 3))    
+
+    while (threads_ready_counter != 3):
+        time.sleep(1)
+
+def orchestrator_trigger(_queue, lock, fd_write):    
     global stop
     model = agent(context_dim=2, action_dim_actor=2, action_dim_critic=2)
     model.load_actor('/home/naposto/phd/nokia/agents/model/ddpg_actor_99.h5')
     model.load_critic('/home/naposto/phd/nokia/agents/model/ddpg_critic_99.h5')
     global cpu_operating
     window = []
+    wait_for_threads()
     while(True):
         time.sleep(time_window)
         with lock:
@@ -289,104 +306,88 @@ def orchestrator_trigger(_queue, lock):
             except queue.Empty:
                 pass
         
+        if (stop):
+            break
         if (len(window)) == 0:
             print('Empty window')
             continue
-        if (stop):
-            break
         snrs = np.array(window)
         cpu_operating = recalculate_cpu(snrs, target_throughput=target_throughput, model=model)
-        global gain_operating
         current_gain_level_bytes = (int(gain_operating* 1000)).to_bytes(2, byteorder='little')
         congestion_level_bytes = int(cpu_operating).to_bytes(4, byteorder='little')                        
-        file_write.write(congestion_level_bytes + current_gain_level_bytes)
-        file_write.flush()
+        print('=> Orchestrator: {}'.format(cpu_operating))
+        fd_write.write(congestion_level_bytes + current_gain_level_bytes)
+        fd_write.flush()
         window.clear()
-        print('=> Orchestrator <=')
-        print('New CPU Congestion {}'.format(cpu_operating))      
     print('Orch: exiting')
                 
 
-def orchestrator_read():
+def thread_fn_snr_reader(fd_read, fd_write):
     global stop
-    is_file_open = False
-    t = None
-    while (not is_file_open):
-        try:
-            with open(BETA_FROM_SRS, mode='rb') as file_read:
-                is_file_open = True                
-                _queue  = Queue()
-                lock   = threading.Lock()
-                t = threading.Thread(target=orchestrator_trigger, args=(_queue, lock))
-                t.start()
-                while(True):
-                    content = file_read.read(8)
-                    if (len(content) < 0):
-                        print('EOF')
-                        break
-
-                    tti = int.from_bytes(content[:4], "little")
-                    snr = int.from_bytes(content[4:], "little") / 1000
-                    with lock:
-                        _queue.put(snr)
-                    if (stop):
-                        break
-        except FileNotFoundError as e:
-            print('Error')
-        finally:
-            if (stop):
-                print('Orch reader: received exit signal')
-    if (t is not None):
-        print('Orch reader: waiting for orch to finish')
-        t.join()
-        print('Orch reader: orch finished')
-    print('Orch reader: exiting')
+    trigger_thread = None
+    _queue  = Queue()
+    lock   = threading.Lock()
+    trigger_thread = threading.Thread(target=orchestrator_trigger, args=(_queue, lock, fd_write))
+    trigger_thread.start()
+    wait_for_threads()
+    while(True):
+        content = fd_read.read(8)
+        if (len(content) < 0):
+            print('EOF')
+            break
+        tti = int.from_bytes(content[:4], "little")
+        snr = int.from_bytes(content[4:], "little") / 1000
+        with lock:
+            _queue.put(snr)
+        if (stop):
+            break
+    print('SNR Reader: received exit signal')
+    if (trigger_thread is not None):
+        print('SNR Reader: waiting for orch to finish')
+        trigger_thread.join()
+        print('SNR Reader: orch finished')
+    print('SNR Reader: exiting')
     
 
 
 
-def orchestrator_writer(tb):        
+def thread_fn_gain_adjuster(tb, fd_writer):        
     global stop
-    is_file_open = False
-    while (not is_file_open):
-        try:
-            with open(BETA_TO_SRS, mode = 'wb') as file_write:
-                is_file_open = True
-                print('Opening beta fifo socket successful. Going to sleep')                
-                time.sleep(10) # this sleep is necessary as the echo_to_cpuset and the iperf startup scripts are initiated    
-                loops = 0
-                print('Starting simulation...')                
-                while (True):
-                    print('Loop {}/{}'.format(loops + 1, total_loops))
-                    current_gain_level_idx = 0
-                    direction = 1
-                    hit_low_snr_first_time = True
-                    while (1):
-                        global gain_operating
-                        gain_operating = gain_levels[current_gain_level_idx]
-                        tb.set_multiply_level_ue1(gain_operating)
-                        current_gain_level_bytes = (int(gain_operating* 1000)).to_bytes(2, byteorder='little')
-                        global cpu_operating
-                        congestion_level_bytes = int(cpu_operating).to_bytes(4, byteorder='little')                        
-                        file_write.write(congestion_level_bytes + current_gain_level_bytes)
-                        file_write.flush()
-                        print('Setting UE Gain level {}'.format(gain_operating))
-                        time.sleep(gain_level_duration)
-                        if (current_gain_level_idx + direction == len(gain_levels) or
-                            current_gain_level_idx + direction == -1):
-                            if (current_gain_level_idx == len(gain_levels) - 1 and hit_low_snr_first_time):
-                                hit_low_snr_first_time = False
-                                continue
-                            elif (current_gain_level_idx == 0):
-                                break
-                            direction = -direction                        
-                        current_gain_level_idx += direction
-                    loops += 1
-                    if (loops == total_loops):
-                        break
-        except FileNotFoundError as e:
-            print('error')
-    print('Exiting...')
+    global gain_operating
+    print('Opening beta fifo socket successful. Going to sleep for 10 seconds')                
+    time.sleep(10) # this sleep is necessary as the echo_to_cpuset and the iperf startup scripts are initiated    
+    loops = 0
+    wait_for_threads()
+    print('Starting simulation...')                
+    while (True):
+        print('Loop {}/{}'.format(loops + 1, total_loops))
+        current_gain_level_idx = 0
+        direction = 1
+        hit_low_snr_first_time = True
+        while (1):
+            gain_operating = gain_levels[current_gain_level_idx]
+            tb.set_multiply_level_ue1(gain_operating)
+            current_gain_level_bytes = (int(gain_operating* 1000)).to_bytes(2, byteorder='little')
+            congestion_level_bytes = int(cpu_operating).to_bytes(4, byteorder='little')                        
+            print('==> Gain Adjuster: {}'.format(gain_operating))
+            fd_writer.write(congestion_level_bytes + current_gain_level_bytes)
+            fd_writer.flush()
+            time.sleep(gain_level_duration)
+            if (stop):
+                break
+            if (current_gain_level_idx + direction == len(gain_levels) or
+                current_gain_level_idx + direction == -1):
+                if (current_gain_level_idx == len(gain_levels) - 1 and hit_low_snr_first_time):
+                    hit_low_snr_first_time = False
+                    continue
+                elif (current_gain_level_idx == 0):
+                    break
+                direction = -direction                        
+            current_gain_level_idx += direction
+        loops += 1
+        if (loops == total_loops):
+            break
+    print('Gain Adjuster: Exiting...')
     stop=True
 
 
@@ -396,35 +397,35 @@ def main(top_block_cls=intra_enb, options=None):
     if gr.enable_realtime_scheduling() != gr.RT_OK:
         print("Error: failed to enable real-time scheduling.")
     tb = top_block_cls()
+    tb.start()
+
+    t1 = None
+    t2 = None
 
     def sig_handler(sig=None, frame=None):
         tb.stop()
         tb.wait()
+        global stop
+        stop=True
+        if (t1 is not None):
+            t1.join()
         sys.exit(0)
-
     signal.signal(signal.SIGINT, sig_handler)
     signal.signal(signal.SIGTERM, sig_handler)
-
-    tb.start()
-
-    is_wfile_open = False
-    is_rfile_open = False
-
-    # while(not is_rfile_open):
-    #     try:
-    #         with open(BETA_FROM_SRS, mode='rb') as file_read:
-    #             is_rfile_open
-    #             while (not)
-    #     except FileNotFoundError as e:
-    #         print('Error')
+    
+    try:
+        with open(BETA_FROM_SRS, mode='rb') as fd_read, open(BETA_TO_SRS, mode='wb') as fd_write:
+            t1 = threading.Thread(target=thread_fn_gain_adjuster, args=(tb, fd_write))    
+            t2 = threading.Thread(target=thread_fn_snr_reader, args=(fd_read, fd_write))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+    except IOError as e:
+        print('Error')
 
 
-    t1 = threading.Thread(target=orchestrator_read)
-    t2 = threading.Thread(target=orchestrator_writer, args=(tb,))    
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
+    
 
 def main2():
     window = np.random.normal(20, 1, size=(window_length))
