@@ -291,7 +291,6 @@ class Master_Agent(mp.Process):
     def send_results(self, batch_info):
         mcs_mean, prb_mean = self.environment.calculate_mean(None, batch_info)
         additional_columns = self.environment.get_csv_result_policy_output(batch_info)
-
         self.results_queue.put([ [batch_info[0]['timestamp'], batch_info[0]['tti'], batch_info[0]['hrq'], mcs_mean, prb_mean], additional_columns ])
 
     def create_array(self):

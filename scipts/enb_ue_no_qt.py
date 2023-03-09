@@ -136,7 +136,7 @@ def automated_monitoring_thread(tb):
                         current_gain_level_bytes = (int(gain_levels[current_gain_level_idx]* 1000)).to_bytes(2, byteorder='little')
                         file_write.write(congestion_level_bytes + current_gain_level_bytes)
                         file_write.flush()
-                        # print('Setting UE Gain level {}'.format(gain_levels[current_gain_level_idx]))
+                        print('Setting UE Gain level {}'.format(gain_levels[current_gain_level_idx]))
                         time.sleep(gain_level_duration)
                         if (current_gain_level_idx + direction == len(gain_levels) or
                             current_gain_level_idx + direction == -1):
