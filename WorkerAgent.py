@@ -163,7 +163,7 @@ class Actor_Critic_Worker(mp.Process):
                 environment_state = self.environment.reset()
                 # environment_state[1] = np.floor(environment_state[1])
                 state = environment_state.copy()
-                state[1] = state[1] - 1
+                state[1] = state[1] - 1.5
                 state  = normalize_state(state)
                 action, mcs, prb = self.pick_action_from_embedding_table(state)
                 _, reward, _, info = self.environment.step([mcs, prb])

@@ -40,10 +40,10 @@ gain_levels = [
 ]
 
 gain_levels = [
-    .5, .5, .5, .12,.12,.12, .5, .5, .5
+    .5, .12, .5
 ]
 
-gain_level_duration = 3
+gain_level_duration = 30
 total_loops = 2
 
 congestion_levels = [
@@ -59,8 +59,8 @@ gain_operating = 1.0
 
 window_length = 100
 
-target_throughput = 13
-time_window       = 3
+target_throughput = 17
+time_window       = 10
 
 percentile        = 1
 func_percentile   = [np.percentile, [percentile]]
@@ -296,8 +296,11 @@ def orchestrator_trigger(_queue, lock, fd_write):
     global cpu_operating
     window = []
     wait_for_threads()
+    offset = 0
     while(True):
-        time.sleep(time_window)
+        start = time.time()
+        time.sleep(time_window - offset)
+        second_time = time.time()
         with lock:
             try:
                 while(True):
@@ -315,10 +318,12 @@ def orchestrator_trigger(_queue, lock, fd_write):
         cpu_operating = recalculate_cpu(snrs, target_throughput=target_throughput, model=model)
         current_gain_level_bytes = (int(gain_operating* 1000)).to_bytes(2, byteorder='little')
         congestion_level_bytes = int(cpu_operating).to_bytes(4, byteorder='little')                        
-        print('=> Orchestrator: {}'.format(cpu_operating))
         fd_write.write(congestion_level_bytes + current_gain_level_bytes)
         fd_write.flush()
         window.clear()
+        end = time.time()
+        offset = end - second_time
+        print('=> Orchestrator: {}, Time elapsed: {:.2f}'.format(cpu_operating, end - start))
     print('Orch: exiting')
                 
 
