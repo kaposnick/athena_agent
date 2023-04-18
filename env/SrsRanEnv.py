@@ -13,6 +13,7 @@ class SrsRanEnv(BaseEnv):
                 policy_output_format = "mcs_prb_joint",
                 title = "srsRAN Environment",
                 verbose = 0,
+                decode_deadline = 3000,
                 scheduling_mode = MODE_SCHEDULING_AC) -> None:
         super(SrsRanEnv, self).__init__(
             input_dims = input_dims,
@@ -20,6 +21,7 @@ class SrsRanEnv(BaseEnv):
             policy_output_format = policy_output_format,
             title = title, 
             verbose = verbose, 
+            decode_deadline = decode_deadline,
             scheduling_mode = scheduling_mode)
              
 

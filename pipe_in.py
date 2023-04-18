@@ -117,6 +117,7 @@ class Coordinator():
         config.environment = SrsRanEnv(
             title = 'SRS RAN Environment', verbose=self.verbose, penalty = 5, 
             input_dims = 2, 
+            decode_deadline=3000,
             scheduling_mode=self.scheduling_mode)
         config.num_episodes_to_run = 0
         config.num_episodes_inference = 2e6

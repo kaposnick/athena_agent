@@ -27,8 +27,8 @@ BETA_FIFO = '/tmp/beta_fifo'
 gain_levels = [
 1.0,  .8,  .6, .5,   .4, .35,  .3, .25, .22, .20, 
 .18, .16, .14, .12, .10, .08, .06]
-gain_level_duration = 3
-total_loops = 10
+gain_level_duration = 30
+total_loops = 1
 
 # gain_level_duration = 30
 # gain_levels = [
@@ -42,6 +42,7 @@ congestion_levels = [
 congestion_levels = [
     0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000
                     ]
+congestion_levels = [0, 500, 1000]
 # congestion_levels = [200]
 congestion_level_duration = gain_level_duration * len(gain_levels) * 2
 
@@ -136,7 +137,7 @@ def automated_monitoring_thread(tb):
                         current_gain_level_bytes = (int(gain_levels[current_gain_level_idx]* 1000)).to_bytes(2, byteorder='little')
                         file_write.write(congestion_level_bytes + current_gain_level_bytes)
                         file_write.flush()
-                        print('Setting UE Gain level {}'.format(gain_levels[current_gain_level_idx]))
+                        # print('Setting UE Gain level {}'.format(gain_levels[current_gain_level_idx]))
                         time.sleep(gain_level_duration)
                         if (current_gain_level_idx + direction == len(gain_levels) or
                             current_gain_level_idx + direction == -1):
