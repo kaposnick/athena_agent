@@ -3,12 +3,10 @@ import numpy as np
 import random
 from OUActionNoise import OUActionNoise
 from env.BaseEnv import BaseEnv
-from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state, normalize_mcs_prb, denormalize_mcs_prb, denormalize_mcs
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer
 from DDPGAgent import DDPGAgent
 from Config import Config
-import time
 import copy
-from scipy.spatial import distance
 
 class Actor_Critic_Worker(mp.Process):
     def __init__(self, 

@@ -67,104 +67,17 @@ def save_weights(model, save_weights_file, throw_exception_if_error = False):
         if (throw_exception_if_error):
             raise e    
 
-def get_basic_actor_network(tf, tfp, num_states):
-    keras = tf.keras
-    layers = keras.layers
-
-    state_input = keras.Input(shape = (num_states))
-    x = layers.Dense(16, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (state_input)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)    
-    norm_params = layers.Dense(1, activation='sigmoid', kernel_initializer = keras.initializers.HeNormal())(x)
-    actor = keras.Model(state_input, norm_params)
-    return actor
-
-def get_basic_critic_network(tf, num_states, num_actions):
-    keras = tf.keras
-    layers = keras.layers
-    state_input = keras.Input(shape = (num_states))
-    action_input = keras.Input(shape = (1))
-    x = layers.Concatenate()([state_input, action_input])
-    x = layers.Dense(16, activation = 'relu', kernel_initializer     = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(256, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    x = layers.Dense(128, activation = 'relu', kernel_initializer = keras.initializers.HeNormal()) (x)
-    q = layers.Dense(1, kernel_initializer = keras.initializers.HeNormal()) (x)
-    critic = keras.Model(inputs = [state_input, action_input], outputs=q)
-    return critic
-
-cpu_min = 0
-snr_min = 18
-cpu_max = 1000
-snr_max = 49
-def normalize_state(state):
-    # cpu, snr1
-    state = state.copy()
-    state[0] -= cpu_min
-    state[0] /= (cpu_max - cpu_min)
-    state[1] -= snr_min
-    state[1] /= (snr_max - snr_min)
-    return state
-
-def denormalize_state(state):
-    state = state.copy()
-    state[0] = state[0] * (cpu_max - cpu_min) + cpu_min
-    state[1] = state[1] * (snr_max - snr_min) + snr_min
-    return state
-
-tbs_max = 24496
-tbs_min = 1256
-def normalize_tbsoutput(tbs):
-    return (tbs - tbs_min) / (tbs_max - tbs_min)
-
-def denormalize_tbs(tbsoutput):
-    return tbsoutput * (tbs_max - tbs_min) + tbs_min
-
-mcs_prb_min = np.array([0, 1], dtype=np.float32)
-mcs_prb_max = np.array([24, 45], dtype=np.float32)
-mcs_min     = np.array([0], dtype=np.float32)
-mcs_max     = np.array([24], dtype=np.float32)
-def normalize_mcs_prb(mcs_prb):
-    return (mcs_prb - mcs_prb_min) / (mcs_prb_max - mcs_prb_min)
-
-def denormalize_mcs_prb(denormalized_mcs_prb):
-    return denormalized_mcs_prb * (mcs_prb_max - mcs_prb_min) + mcs_prb_min
-
-def normalize_mcs(mcs):
-    return (mcs - mcs_min) / (mcs_max - mcs_min)
-
-def denormalize_mcs(denormalized_mcs):
-    return denormalized_mcs * (mcs_max - mcs_min) + mcs_min
-
 if (__name__== '__main__'):
     tf, os, tfp = import_tensorflow('3', False)
-
-    actor = get_basic_actor_network(tf, tfp, 2)
-    actor.load_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_99_3_mcs.h5')
-    critic = get_basic_critic_network(tf, 2, 2)
-    critic.load_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_99_3_mcs.h5')
+    
+    from DDPGAgent import DDPGAgent
+    ddpg_agent = DDPGAgent(tf, 2, 2)
+    ddpg_agent.load_actor()
+    ddpg_agent.load_actor_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_99_3_mcs.h5')
+    ddpg_agent.load_critic()
+    ddpg_agent.load_critic_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_99_3_mcs.h5')
     state = np.array([0, 31], dtype = np.float32)
-    # action = np.array([0.5], dtype = np.float32)
-    state = normalize_state(state)
-    tf_state = tf.convert_to_tensor([state])
-    print(denormalize_tbs(actor(tf_state)))
-    # tf_action = tf.convert_to_tensor([action])
-
-    a = 1
-
-
-
-    pass
-
-    pass
-
-    while (1):
-        pass
+    print(ddpg_agent(state))
 
 
 

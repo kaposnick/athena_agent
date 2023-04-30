@@ -1,7 +1,7 @@
 import multiprocessing as mp
 from multiprocessing import shared_memory
 import numpy as np
-from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM, denormalize_state
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM
 
 from env.DecoderEnv import BaseEnv
 import time
