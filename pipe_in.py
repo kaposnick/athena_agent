@@ -101,8 +101,8 @@ class Coordinator():
             results_file = '/home/naposto/phd/nokia/experiment_mcs_policy/results.csv'
             load_pretrained_weights = True
             # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
-            actor_pretrained_weights_path =   '/home/naposto/phd/nokia/agents/model/ddpg_actor_99.h5'
-            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_critic_99.h5'
+            actor_pretrained_weights_path =   '/home/naposto/phd/nokia/agents/model/ddpg_actor_99_3_mcs.h5'
+            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_critic_99_3_mcs.h5'
 
 
 

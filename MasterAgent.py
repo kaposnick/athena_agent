@@ -7,6 +7,7 @@ from buffers.Buffer import PERBuffer_Proportional
 from common_utils import MODE_INFERENCE, MODE_SCHEDULING_AC, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, get_shared_memory_ref, import_tensorflow, map_weights_to_shared_memory_buffer, publish_weights_to_shared_memory, save_weights
 import random
 import numpy as np
+from DDPGAgent import DDPGAgent
 
 class Master_Agent(mp.Process):
     def __init__(self,
@@ -86,30 +87,27 @@ class Master_Agent(mp.Process):
     def initiate_models(self):
         try:
             stage = 'Creating the neural networks'
-            models = [
-                get_basic_actor_network(self.tf, self.tfp, self.state_size), 
-                get_basic_critic_network(self.tf, self.state_size, 2)
-            ]
+            self.ddpg_agent = DDPGAgent(self.tf, self.state_size, 1)
+            self.ddpg_agent.load_actor()
+            self.ddpg_agent.load_critic()
 
             self.optimizer = self.tf.keras.optimizers.Adam(
                 learning_rate = self.hyperparameters['Actor_Critic_Common']['learning_rate']                
             )
 
-            self.actor = models[0]
-            self.actor_memory_bytes.value, actor_dtype = self.compute_model_size(self.actor)
+            self.actor_memory_bytes.value, actor_dtype = self.compute_model_size(self.ddpg_agent.actor)
             
-            self.critic = models[1]
-            self.critic_memory_bytes.value, critic_dtype = self.compute_model_size(self.critic)
+            self.critic_memory_bytes.value, critic_dtype = self.compute_model_size(self.ddpg_agent.critic)
             while (self.memory_created.value == 0):
                 pass
 
             stage = 'Actor memory reference creation'
-            self.shm_actor, self.np_array_actor = self.get_shared_memory_reference(self.actor, self.actor_memory_name)
-            self.weights_actor = map_weights_to_shared_memory_buffer(self.actor.get_weights(), self.np_array_actor)
+            self.shm_actor, self.np_array_actor = self.get_shared_memory_reference(self.ddpg_agent.actor, self.actor_memory_name)
+            self.weights_actor = map_weights_to_shared_memory_buffer(self.ddpg_agent.actor.get_weights(), self.np_array_actor)
 
             stage = 'Critic memory reference creation'
-            self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.critic, self.critic_memory_name)
-            self.weights_critic = map_weights_to_shared_memory_buffer(self.critic.get_weights(), self.np_array_critic)
+            self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.ddpg_agent.critic, self.critic_memory_name)
+            self.weights_critic = map_weights_to_shared_memory_buffer(self.ddpg_agent.critic.get_weights(), self.np_array_critic)
         except Exception as e:
             print(str(self) + ' -> Stage: {}, Error initiating models: {}'.format(stage, e))
             raise e
@@ -366,15 +364,15 @@ class Master_Agent(mp.Process):
     def load_initial_weights_if_configured(self):
          if (self.config.load_initial_weights):
                 print(str(self) + ' -> Loading actor initial weights from ' + self.config.initial_weights_path)
-                self.actor.load_weights(self.config.initial_weights_path)
+                self.ddpg_agent.load_actor_weights(self.config.initial_weights_path)
                 print(str(self) + ' -> Loading critic initial weights from ' + self.config.critic_initial_weights_path)
-                self.critic.load_weights(self.config.critic_initial_weights_path)
+                self.ddpg_agent.load_critic_weights(self.config.critic_initial_weights_path)
 
     def publish_weights(self):
-        publish_weights_to_shared_memory(self.actor.get_weights(), self.np_array_actor)                
+        publish_weights_to_shared_memory(self.ddpg_agent.actor.get_weights(), self.np_array_actor)                
         print(str(self) + ' -> Published actor weights to shared memory')
         
-        publish_weights_to_shared_memory(self.critic.get_weights(), self.np_array_critic)
+        publish_weights_to_shared_memory(self.ddpg_agent.critic.get_weights(), self.np_array_critic)
         print(str(self) + ' -> Published critic weights to shared memory')
 
     def step(self, state, action, reward):

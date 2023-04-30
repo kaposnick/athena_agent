@@ -3,7 +3,8 @@ import numpy as np
 import random
 from OUActionNoise import OUActionNoise
 from env.BaseEnv import BaseEnv
-from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state, normalize_mcs_prb, denormalize_mcs_prb
+from common_utils import MODE_SCHEDULING_AC, MODE_SCHEDULING_NO, MODE_SCHEDULING_RANDOM, MODE_TRAINING, get_basic_actor_network, get_basic_critic_network, import_tensorflow, get_shared_memory_ref, map_weights_to_shared_memory_buffer, normalize_state, normalize_mcs_prb, denormalize_mcs_prb, denormalize_mcs
+from DDPGAgent import DDPGAgent
 from Config import Config
 import time
 import copy
@@ -70,31 +71,28 @@ class Actor_Critic_Worker(mp.Process):
     def initiate_models(self, associate_with_master=True):
         try:
             stage = 'Creating the neural networks'
-            
-            models = [
-                get_basic_actor_network(self.tf, self.tfp, self.state_size), 
-                get_basic_critic_network(self.tf, self.state_size, 2)
-            ]
+            self.ddpg_agent = DDPGAgent(self.tf, self.state_size, 1)
+            self.ddpg_agent.set_action_array(self.environment.action_array)
+            self.ddpg_agent.load_actor() 
+            self.ddpg_agent.load_critic()
 
             stage = 'Actor memory reference creation'
-            self.actor = models[0]
             if (associate_with_master):
-                self.shm_actor, self.np_array_actor = self.get_shared_memory_reference(self.actor, self.actor_memory_name)
-                self.weights_actor = map_weights_to_shared_memory_buffer(self.actor.get_weights(), self.np_array_actor)
+                self.shm_actor, self.np_array_actor = self.get_shared_memory_reference(self.ddpg_agent.actor, self.actor_memory_name)
+                self.weights_actor = map_weights_to_shared_memory_buffer(self.ddpg_agent.actor.get_weights(), self.np_array_actor)
 
             stage = 'Action-value critic memory reference creation'
-            self.critic = models[1]
             if (associate_with_master):
-                self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.critic, self.critic_memory_name)
-                self.weights_critic = map_weights_to_shared_memory_buffer(self.critic.get_weights(), self.np_array_critic)
+                self.shm_critic, self.np_array_critic = self.get_shared_memory_reference(self.ddpg_agent.critic, self.critic_memory_name)
+                self.weights_critic = map_weights_to_shared_memory_buffer(self.ddpg_agent.critic.get_weights(), self.np_array_critic)
         except Exception as e:
             self.print('Stage: {}, Error initiating models: {}'.format(stage, e))
             raise e
 
     def update_weights(self):
         with self.optimizer_lock:
-            self.actor.set_weights(copy.deepcopy(self.weights_actor))            
-            self.critic.set_weights(copy.deepcopy(self.weights_critic))
+            self.ddpg_agent.actor.set_weights(copy.deepcopy(self.weights_actor))            
+            self.ddpg_agent.critic.set_weights(copy.deepcopy(self.weights_critic))
 
     def execute_in_collecting_stats_mode(self):
         self.environment.setup(self.worker_num, self.total_workers)
@@ -121,7 +119,7 @@ class Actor_Critic_Worker(mp.Process):
                 self.successfully_started_worker.value += 1
             while (True):
                 state = self.environment.reset()
-                action,mcs, prb = self.pick_action_from_embedding_table(state)
+                action,mcs, prb = self.ddpg_agent(state)
                 action = 'random'
                 _, reward, _, info = self.environment.step([action])
                 if (reward is None):
@@ -156,16 +154,11 @@ class Actor_Critic_Worker(mp.Process):
             
             self.ep_ix = 0
             while (True):
-                self.ep_ix += 1
-                # if (self.isin_training_mode() and (self.ep_ix % self.local_update_period == 0)):
-                #     self.update_weights()
-                
+                self.ep_ix += 1                
                 environment_state = self.environment.reset()
-                # environment_state[1] = np.floor(environment_state[1])
                 state = environment_state.copy()
                 state[1] = state[1] - 1.5
-                state  = normalize_state(state)
-                action, mcs, prb = self.pick_action_from_embedding_table(state)
+                action, mcs, prb = self.ddpg_agent(state)
                 _, reward, _, info = self.environment.step([mcs, prb])
                 if (reward is None):
                     # This happens in cases where the srsRAN doesn't apply the decided action
@@ -203,32 +196,6 @@ class Actor_Critic_Worker(mp.Process):
             self.execute_in_schedule_ac_mode()
         elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):
             self.execute_in_schedule_random_mode()
-
-    
-
-    def pick_action_from_embedding_table(self, state: np.array, k = 9 ):
-        context = self.tf.convert_to_tensor([state], dtype = self.tf.float32)
-
-        mcs_prb_array      = self.environment.action_array
-        mcs_prb_normalized = self.actor(context)[0]
-        mcs_prb            = denormalize_mcs_prb(mcs_prb_normalized)
-
-        l2_norms           = np.zeros(shape=(len(mcs_prb_array)))
-        weights = np.array([1, 1])
-        for i, mcs_prb_comb in enumerate(mcs_prb_array):
-            l2_norms[i] = distance.euclidean(mcs_prb, mcs_prb_comb, weights)
-
-        partition          = np.argpartition(l2_norms, k)
-
-        k_closest_mcs_prb  = mcs_prb_array[partition[:k]]
-        k_closest_mcs_prb_normalized = normalize_mcs_prb(k_closest_mcs_prb)
-        context_extended   = np.broadcast_to(context, (k, context.shape[1]))
-        q_values           = self.critic([context_extended, k_closest_mcs_prb_normalized])
-        argmin_q_value     = np.argmax(q_values)
-
-        closest_mcs_prb    = k_closest_mcs_prb[argmin_q_value]
-        
-        return str(mcs_prb_normalized), *[int(x) for x in closest_mcs_prb]
 
     def print(self, string_to_print, end = None):
         if ((self.worker_num == 4 and False) or True):

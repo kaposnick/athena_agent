@@ -22,7 +22,8 @@ REVERSE_PRB_SPACE = {
     int(prb): i for i, prb in enumerate(PRB_SPACE)
 }
 # PRB_SPACE = np.array([45], dtype=np.float16)
-MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],  dtype=np.float16)  
+MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25],  dtype=np.float16)
+MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],  dtype=np.float16)
 I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
 
@@ -73,6 +74,7 @@ class BaseEnv(gym.Env):
 
             self.mapping_array = sorted(self.mapping_array, key = lambda el: (el['tbs'], el['mcs']))
             self.action_array = [np.array([x['mcs'], x['prb']]) for x in self.mapping_array] # sort by tbs/mcs
+            self.mcs_array = np.array([np.array([x]) for x in MCS_SPACE])
             self.action_array = np.array(self.action_array)
             self.action_prb_index_array = [np.array([x['mcs'], REVERSE_PRB_SPACE[x['prb']]]) for x in self.mapping_array]
 
