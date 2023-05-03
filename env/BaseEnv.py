@@ -29,7 +29,8 @@ I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14,
 
 class BaseEnv(gym.Env):
     def __init__(self, 
-                input_dims: Number, 
+                input_dims: Number,
+                num_actions: Number,
                 penalty: Number,
                 policy_output_format: str,
                 title: str, 
@@ -96,7 +97,7 @@ class BaseEnv(gym.Env):
             self.tbs_len = len(self.tbs_array)
             
             self.mcs_prb_array = np.array([np.array([x[0][2], x[0][1]]) for x in self.tbs_to_action_array])
-            self.action_space = spaces.Discrete(len(self.action_array))
+            self.action_space = num_actions
             self.fn_action_translation = self.fn_mcs_prb_joint_action_translation
             self.fn_calculate_mean = self.fn_mcs_prb_joint_mean_calculation
         else:

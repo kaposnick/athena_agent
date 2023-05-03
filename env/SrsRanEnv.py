@@ -9,6 +9,7 @@ import time
 class SrsRanEnv(BaseEnv):
     def __init__(self,
                 input_dims = 3,
+                num_actions = 2,
                 penalty = 15,
                 policy_output_format = "mcs_prb_joint",
                 title = "srsRAN Environment",
@@ -17,6 +18,7 @@ class SrsRanEnv(BaseEnv):
                 scheduling_mode = MODE_SCHEDULING_AC) -> None:
         super(SrsRanEnv, self).__init__(
             input_dims = input_dims,
+            num_actions = num_actions,
             penalty = penalty,
             policy_output_format = policy_output_format,
             title = title, 

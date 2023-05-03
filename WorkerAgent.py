@@ -69,7 +69,7 @@ class Actor_Critic_Worker(mp.Process):
     def initiate_models(self, associate_with_master=True):
         try:
             stage = 'Creating the neural networks'
-            self.ddpg_agent = DDPGAgent(self.tf, self.state_size, 1)
+            self.ddpg_agent = DDPGAgent(self.tf, self.state_size, self.action_size)
             self.ddpg_agent.set_action_array(self.environment.action_array)
             self.ddpg_agent.load_actor() 
             self.ddpg_agent.load_critic()

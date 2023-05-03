@@ -143,11 +143,7 @@ class BaseAgent(object):
         return self.environment.get_state_size()
 
     def get_action_size(self) -> np.ndarray:
-        env_type = type(self.environment.action_space)
-        if (env_type == gym.spaces.Discrete):
-            return np.array([self.environment.action_space.n], dtype=np.int32)
-        elif (env_type == gym.spaces.MultiDiscrete):
-            return self.environment.action_space.nvec
+        return self.environment.get_action_space()
 
     def track_episodes_data(self):
         self.episode_states.append(self.state)

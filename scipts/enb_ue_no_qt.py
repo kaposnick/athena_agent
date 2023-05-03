@@ -20,31 +20,16 @@ from gnuradio import eng_notation
 from gnuradio import zeromq
 
 BETA_FIFO = '/tmp/beta_fifo'
-
-# gain_levels = [
-#         1.0,  .8,  .6, .5,   .4, .35,  .3, .25, .22, .20, 
-#         .18, .16, .14, .12, .10, .09, .08, .07, .06, .05]
 gain_levels = [
 1.0,  .8,  .6, .5,   .4, .35,  .3, .25, .22, .20, 
 .18, .16, .14, .12, .10, .08, .06]
 gain_level_duration = 30
-total_loops = 1
 
-# gain_level_duration = 30
 # gain_levels = [
 # 1.0,  .8,  .6, .5,   .4, .35,  .3, .28, .27, .26, .25, .24, .23, .22, .21, .20, .19,
 # .18, .17, .16, .15, .14, .13, .12, .11, .10, .09, .08, .07, .06]
-# gain_levels = [1, 1, 1, 1]
-# gain_levels = [1.0, .20, .05]
-congestion_levels = [
-    0, 200, 400, 600, 800, 1000
-                    ]
-congestion_levels = [
-    0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000
-                    ]
 congestion_levels = [0, 500, 1000]
-# congestion_levels = [200]
-congestion_level_duration = gain_level_duration * len(gain_levels) * 2
+total_loops = 1
 
 class intra_enb(gr.top_block):
 
@@ -91,12 +76,6 @@ class intra_enb(gr.top_block):
     def get_noise_level_ue1(self):
         return self.noise_level_ue1
 
-    def set_noise_level_ue1(self, noise_level_ue1):
-        # print('Changing noise voltage to: {}'.format(noise_level_ue1))
-        self.noise_level_ue1 = noise_level_ue1
-        self.uplink.set_noise_voltage(self.noise_level_ue1)
-        self.downlink.set_noise_voltage(self.noise_level_ue1)
-
     def set_multiply_level_ue1(self, multiply_level_ue1):
         self.ul_gain_level = multiply_level_ue1
         self.dl_gain_level = multiply_level_ue1
@@ -104,7 +83,47 @@ class intra_enb(gr.top_block):
         self.multiplier_dl.set_k(self.dl_gain_level)
 
 import time
-import numpy as np
+
+def parse_input_token(token, prefix, sep='='):
+    sub_tokens = token.split(sep)
+    if (len(sub_tokens) != 2):
+        return None
+    if (sub_tokens[0] != prefix):
+        return None
+    return float(sub_tokens[1])
+
+def input_thread(tb):
+    is_file_open = False
+    while (not is_file_open):
+        try:
+            with open(BETA_FIFO, mode='wb') as file_write:
+                is_file_open = True
+                print('Input threading listening to requests...')
+                for line in sys.stdin:
+                    try:
+                        line = line.strip()
+                        print('Received: {}'.format(line))
+                        tokens = line.split(',')
+                        if (len(tokens) != 2):
+                            continue
+                        tok_beta, tok_gain = tokens
+                        beta = parse_input_token(tok_beta, 'beta')
+                        gain = parse_input_token(tok_gain, 'gain')
+                        if (beta == None or gain == None):
+                            continue                        
+                        
+                        tb.set_multiply_level_ue1(gain)
+                        current_gain_level_bytes = (int(gain * 1000)).to_bytes(2, byteorder='little')
+                        congestion_level_bytes   = (int(beta)).to_bytes(4, byteorder='little')
+                        file_write.write(congestion_level_bytes + current_gain_level_bytes)
+                        file_write.flush()
+                    except Exception as e:
+                        print('Exception occurred: {}'.format(e))
+        except FileNotFoundError as e:
+            print('error')
+        finally:
+            print('Grafcefully exiting...')
+    
 
 def automated_monitoring_thread(tb):    
     current_cpu_level_idx = 0
@@ -132,7 +151,6 @@ def automated_monitoring_thread(tb):
                     direction = 1
                     hit_low_snr_first_time = True
                     while (1):
-                        # tb.set_multiply_level_ue1(gain_levels[len(gain_levels) // 2])
                         tb.set_multiply_level_ue1(gain_levels[current_gain_level_idx])
                         current_gain_level_bytes = (int(gain_levels[current_gain_level_idx]* 1000)).to_bytes(2, byteorder='little')
                         file_write.write(congestion_level_bytes + current_gain_level_bytes)
@@ -162,6 +180,13 @@ def automated_monitoring_thread(tb):
             print('Gracefully exiting...')
 
 import threading
+import argparse
+
+def init_parser():
+    parser = argparse.ArgumentParser(description="Python process for setting beta and channel gain")
+    parser.add_argument('-m', '--mode', choices=['cmd', 'loop'], default='cmd', dest='mode', help='Mode of operation: Loop through beta and gain or from command line')
+
+    return parser
 
 def main(top_block_cls=intra_enb, options=None):
     if gr.enable_realtime_scheduling() != gr.RT_OK:
@@ -177,7 +202,14 @@ def main(top_block_cls=intra_enb, options=None):
     signal.signal(signal.SIGTERM, sig_handler)
 
     tb.start()
-    t2 = threading.Thread(target=automated_monitoring_thread, args=(tb, ))
+
+    parser = init_parser()
+    args = parser.parse_args()
+    mode = args.mode
+    if (mode == 'loop'):
+        t2 = threading.Thread(target=automated_monitoring_thread, args=(tb, ))
+    elif (mode == 'cmd'):
+        t2 = threading.Thread(target=input_thread, args=(tb,))
     
     t2.start()
     t2.join()

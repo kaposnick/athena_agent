@@ -45,7 +45,7 @@ class Master_Agent(mp.Process):
         self.clipping = self.config.hyperparameters['Actor_Critic_Common']['clipping']
         self.compute_weights = True
         self.gradients_update_idx = 0
-
+        self.stop_thread = False
         self.UPDATE_NN_EVERY = 64
         self.UPDATE_MEM_EVERY = 20
         self.UPDATE_MEM_PAR_EVERY = 300
@@ -87,7 +87,7 @@ class Master_Agent(mp.Process):
     def initiate_models(self):
         try:
             stage = 'Creating the neural networks'
-            self.ddpg_agent = DDPGAgent(self.tf, self.state_size, 1)
+            self.ddpg_agent = DDPGAgent(self.tf, self.state_size, self.action_size)
             self.ddpg_agent.load_actor()
             self.ddpg_agent.load_critic()
 
@@ -357,9 +357,14 @@ class Master_Agent(mp.Process):
 
 
     def send_results_thread(self):
+        import queue
         while(True):
-            batch_info = self.batch_info_queue.get()
-            self.send_results([batch_info])
+            try:
+                batch_info = self.batch_info_queue.get(1)
+                self.send_results([batch_info])
+            except queue.Empty as e:
+                if (self.stop_thread):
+                    break
 
     def load_initial_weights_if_configured(self):
          if (self.config.load_initial_weights):
@@ -436,7 +441,14 @@ class Master_Agent(mp.Process):
             print(str(self) + ' -> Exiting ...')
             self.save_weights('_exiting_')
 
+
+    def exit_gracefully(self, signum, frame):
+        self.stop_thread = True
+
     def run(self) -> None:
+        import signal
+        signal.signal(signal.SIGINT , self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
         if (self.scheduling_mode == MODE_SCHEDULING_AC):
             self.execute_in_schedule_ac_mode()
         elif (self.scheduling_mode == MODE_SCHEDULING_RANDOM):

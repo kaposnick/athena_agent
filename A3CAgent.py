@@ -29,15 +29,17 @@ COLUMNS = [
 PIPE_OUT = '/tmp/a3c_pipe_out'
 
 class A3CAgent(BaseAgent):
-    def __init__(self, config, num_processes, scheduling_mode = MODE_SCHEDULING_AC, training_mode = MODE_TRAINING) -> None:
+    def __init__(self, config, num_processes, num_actions,scheduling_mode = MODE_SCHEDULING_AC, training_mode = MODE_TRAINING) -> None:
         super(A3CAgent, self).__init__(config)  
         self.num_processes = num_processes
+        self.num_actions   = num_actions
         self.worker_processes = []
         self.optimizer_worker = None
         self.actor_memory_name = 'model_actor'
         self.critic_memory_name = 'model_critic'
         self.scheduling_mode = scheduling_mode
         self.training_mode = training_mode
+        self.exit_gracefully_flag = False
 
     def kill_all(self):
         self.exit_gracefully()
@@ -56,7 +58,7 @@ class A3CAgent(BaseAgent):
         master_agent_stop = mp.Value('i', 0)
         worker_agent_initialized = mp.Value('i', 0)
         worker_agent_stop = mp.Value('i', 0)
-        master_agent = Master_Agent(
+        self.optimizer_worker = Master_Agent(
             self.environment,
             self.hyperparameters, self.config, self.state_size, self.action_size,
             None, None, None,
@@ -69,9 +71,11 @@ class A3CAgent(BaseAgent):
             in_training_mode=None,
             scheduling_mode=self.scheduling_mode
         )
-        master_agent.start()
+        self.optimizer_worker.start()
         while (master_agent_initialized.value == 0):
                 pass
+        
+        print('Waiting working threads to finish')
         for worker_num in range(self.num_processes):
             import copy
             worker_environment = copy.deepcopy(self.environment)
@@ -95,6 +99,7 @@ class A3CAgent(BaseAgent):
                 processes_started_successfully.value = 1
         if (self.config.save_results):
             self.save_results(self.config.results_file_path, self.results_queue)
+        self.optimizer_worker.join()
         for worker in self.worker_processes:
             worker.join()
 
@@ -213,7 +218,8 @@ class A3CAgent(BaseAgent):
                 pass
             
             save_file = self.config.results_file_path
-            print('Optimizer thread started successfully')
+            print('Master thread started successfully')
+            print('Waiting working threads to finish')
             for worker_num in range(self.num_processes):
                 import copy
                 worker_environment = copy.deepcopy(self.environment)
@@ -233,7 +239,7 @@ class A3CAgent(BaseAgent):
                 self.worker_processes.append(worker)
             while (successfully_started_worker.value < self.num_processes):
                 pass
-
+            print('Worker threads started successfully')
             if (processes_started_successfully is not None):
                 processes_started_successfully.value = 1
             if (self.config.save_results):
@@ -256,7 +262,7 @@ class A3CAgent(BaseAgent):
             episode = 0
             has_entered_inference_mode = False
             string_buffer = ""
-            while True:
+            while (not self.exit_gracefully_flag):
                 carry_on = True
                 if (episode == self.config.num_episodes_to_run and not has_entered_inference_mode):
                     if hasattr(self, 'in_training_mode'):
@@ -295,6 +301,8 @@ class A3CAgent(BaseAgent):
                 worker_process.join()
         
         print('Killing master process')
-        if (self.optimizer_worker.is_alive()):
+        if (self.optimizer_worker is not None and self.optimizer_worker.is_alive()):
             self.optimizer_worker.kill()
-            self.optimizer_worker.join()       
+            self.optimizer_worker.join()
+
+        self.exit_gracefully_flag = True       

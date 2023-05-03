@@ -14,12 +14,12 @@ VERIFY_ACTION = '/tmp/verify_action'
 REWARD_IN = '/tmp/return_in'
 
 class Coordinator():
-    def __init__(self):
+    def __init__(self, scheduling_mode, actor_weights, critic_weights, results_file, num_actions):
         self.total_agents = 8
         self.verbose = 0
-        self.scheduling_mode = MODE_SCHEDULING_AC
-        # self.scheduling_mode = MODE_SCHEDULING_NO
+        self.scheduling_mode = scheduling_mode
         self.training_mode   = MODE_INFERENCE
+        self.num_actions = num_actions
 
         # validity byte
         # observation is: snr, beta, bsr all are integers32
@@ -54,12 +54,13 @@ class Coordinator():
         nd_array = np.ndarray(shape=(9 * self.total_agents), dtype=np.int32, buffer=shm_reward.buf)
         nd_array[:] = np.full(shape=(9 * self.total_agents), fill_value=0)                
 
-        self.config = self.get_environment_config()
+        self.config = self.get_environment_config(actor_weights, critic_weights, results_file, num_actions)
         self.processes_started_successfully = mp.Value('i', 0)
         
         self.a3c_agent = A3CAgent(
             self.config, 
             self.total_agents, 
+            num_actions=self.num_actions,
             scheduling_mode=self.scheduling_mode,
             training_mode=self.training_mode
         )
@@ -83,47 +84,23 @@ class Coordinator():
             self.sched_proc.kill()
             self.sched_proc.join()
 
-    def get_environment_config(self) -> Config:
-        import sys
-        args = sys.argv[1:]
-        if (len(args) >= 4):
-            seed = int(args[0])
-            num_episodes = int(args[1])
-            results_file = args[2]
-            load_pretrained_weights = bool(int(args[3]))
-            if (load_pretrained_weights):
-                pretrained_weights_path = args[4]
-        else:
-            i = 0
-            seed = i * 35
-            num_episodes = 10000
-            # results_file = '/home/naposto/phd/nokia/data/csv_47/real_enb_wo_pretrained_agent_2/run_0.csv'
-            results_file = '/home/naposto/phd/nokia/experiment_mcs_policy/results.csv'
-            load_pretrained_weights = True
-            # actor_pretrained_weights_path = '/home/naposto/phd/nokia/pretraining/colab_weights_qac/q_actor_weights_1users.h5'
-            actor_pretrained_weights_path =   '/home/naposto/phd/nokia/agents/model/ddpg_actor_99_3_mcs.h5'
-            critic_pretrained_weights_path = '/home/naposto/phd/nokia/agents/model/ddpg_critic_99_3_mcs.h5'
-
-
-
-        # index 0 -> initial seed
-        # index 1 -> number of episodes
-        # index 2 -> results file
-        # index 3 -> agent's initial weight [True | False]
-        # index 4 -> agent's initial weight file (in .h5 format)
+    def get_environment_config(self, path_actor_weights, path_critic_weights, path_results, num_actions) -> Config:
+        i = 0
+        seed = 35
+        load_pretrained_weights = (path_actor_weights is not None) or (path_critic_weights is not None)
 
         config = Config()
         config.seed = seed
         config.environment = SrsRanEnv(
             title = 'SRS RAN Environment', verbose=self.verbose, penalty = 5, 
             input_dims = 2, 
+            num_actions=num_actions,
             decode_deadline=3000,
             scheduling_mode=self.scheduling_mode)
         config.num_episodes_to_run = 0
         config.num_episodes_inference = 2e6
         config.save_results = True
-        config.results_file_path = results_file
-        # config.results_file_path = '/home/naposto/phd/nokia/data/csv_46/real_enb_high_beta_low_snr_trained_2.csv'
+        config.results_file_path = path_results
 
         config.save_weights = True
         config.save_weights_period = 100
@@ -131,8 +108,8 @@ class Coordinator():
         
         config.load_initial_weights = load_pretrained_weights
         if (config.load_initial_weights):
-            config.initial_weights_path = actor_pretrained_weights_path
-            config.critic_initial_weights_path = critic_pretrained_weights_path
+            config.initial_weights_path = path_actor_weights
+            config.critic_initial_weights_path = path_critic_weights
 
         config.hyperparameters = {
             'Actor_Critic_Common': {
@@ -311,16 +288,64 @@ class Coordinator():
                 pass
 
 
-def exit_gracefully():
+def exit_gracefully(signal, frame):
     coordinator.kill_all()
 
 
 coordinator = None
 
+import argparse
+
 if __name__== '__main__':
     import signal
     signal.signal(signal.SIGINT , exit_gracefully)
     signal.signal(signal.SIGTERM, exit_gracefully)
-    coordinator = Coordinator()
+
+    parser = argparse.ArgumentParser(description='srsENB AI scheduler implementation')
+    parser.add_argument('-m', '--mode', choices=['athena', 'srs', 'random'], required=True, dest='mode')
+    parser.add_argument('-r', '--results', required=True, dest='path_results')
+    parser.add_argument('--actions', type=int, choices=range(1,3), dest='actions')
+    parser.add_argument('--actor_weights', dest='actor_weights')
+    parser.add_argument('--critic_weights', dest='critic_weights')
+    
+    scheduling_mode = None
+    path_results = None
+    path_actor_weights = None
+    path_critic_weights = None
+    num_actions = None
+    
+    args = parser.parse_args()
+    print(args)
+    path_results = args.path_results
+    mode = args.mode
+    if (mode == 'athena'):
+        scheduling_mode = MODE_SCHEDULING_AC
+        num_actions = args.actions
+        if (num_actions == 1):
+            path_actor_weights = args.actor_weights
+            if (path_actor_weights is None):
+                path_actor_weights = '/home/naposto/phd/nokia/agents/model/ddpg_actor_99_3_mcs.h5'
+            path_critic_weights = args.critic_weights
+            if (path_critic_weights is None):
+                path_critic_weights = '/home/naposto/phd/nokia/agents/model/ddpg_critic_99_3_mcs.h5'
+        elif (num_actions == 2):
+            path_actor_weights = args.actor_weights
+            if (path_actor_weights is None):
+                path_actor_weights = '/home/naposto/phd/nokia/agents/model/ddpg_actor_99.h5'
+            path_critic_weights = args.critic_weights
+            if (path_critic_weights is None):
+                path_critic_weights = '/home/naposto/phd/nokia/agents/model/ddpg_critic_99.h5'
+    elif (mode == 'srs'):
+        scheduling_mode = MODE_SCHEDULING_NO
+        num_actions = 2
+    elif (mode == 'random'):
+        scheduling_mode = MODE_SCHEDULING_RANDOM
+        num_actions = 2
+
+
+    coordinator = Coordinator(
+        scheduling_mode=scheduling_mode, results_file=path_results, 
+        actor_weights=path_actor_weights, critic_weights=path_critic_weights,
+        num_actions=num_actions)
     coordinator.start()
 
