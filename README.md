@@ -53,8 +53,8 @@ Prevent default Linux scheduler from allocating tasks (threads) on a user-predef
 
 Open with an editor of your choice file <code>/etc/default/grub</code> and set the following parameter to <code>GRUB_CMDLINE_LINUX_DEFAULT="maybe-ubiquity isolcpus=9-11"</code>. After run
 ```shell
-update-grub
-reboot
+$ update-grub
+$ reboot
 ```
 so that the isolation takes effect.
 
