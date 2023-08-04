@@ -86,6 +86,6 @@ cset:
 srsUE is going to run on a seperate networking namespace with distinct routing tables.
 
 ```shell
-sudo ip netns add ue
+$ sudo ip netns add ue
 ```
 
