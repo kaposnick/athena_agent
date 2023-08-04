@@ -1,0 +1,140 @@
+version: '3'
+
+services:
+  srsepc:
+    container_name: athena_srsepc
+    build:
+      dockerfile: docker/Dockerfile
+      context: ../
+    command: 
+    - srsepc
+    - .config/srsran/epc.conf
+    - --hss.db_file
+    - .config/srsran/user_db.csv
+    - --mme.mme_bind_addr=10.2.1.2
+    - --spgw.gtpu_bind_addr=10.2.1.2
+    # - --spgw.sgi_if_addr=172.18.0.1
+    volumes:
+    - srs_athena_volume:/tmp/
+    networks:
+      core:
+        ipv4_address: 10.2.1.2
+    privileged: true
+    cap_add:
+    - NET_ADMIN
+    - SYS_NICE
+    devices:
+    - /dev/net/tun
+  srsenb:
+    container_name: athena_srsenb
+    build: 
+      dockerfile: docker/Dockerfile
+      context: ../
+    command: 
+    - srsenb 
+    - .config/srsran/enb.conf
+    - --enb_files.rr_config
+    - .config/srsran/rr.conf
+    - --enb_files.sib_config
+    - .config/srsran/sib.conf
+    - --enb_files.rb_config
+    - .config/srsran/rb.conf
+    - --scheduler.policy=${VAR_SCHED}
+    - --rf.device_name=zmq
+    - --rf.device_args=fail_on_disconnect=true,tx_port=tcp://*:2101,rx_port=tcp://10.2.1.4:2100,id=enb,base_srate=23.04e6
+    - --enb.mme_addr=10.2.1.2
+    - --enb.gtp_bind_addr=10.2.1.3
+    - --enb.s1c_bind_addr=10.2.1.3
+    volumes:
+    - srs_athena_volume:/tmp/
+    networks:
+      core:
+        ipv4_address: 10.2.1.3
+    ports:
+    - "2101:2101/tcp"
+    privileged: true
+    cap_add:
+    - SYS_NICE
+  channel:
+    container_name: channel
+    build:
+      dockerfile: docker/channel.Dockerfile
+      context: ../
+    command:
+    - python3
+    - testbed_wireless_channel.py
+    - --mode=cmd
+    - --enb_tx=tcp://10.2.1.3:2101
+    - --enb_rx=tcp://*:2100
+    - --ue_tx=tcp://10.2.1.5:2001
+    - --ue_rx=tcp://*:2000
+    volumes:
+    - srs_athena_volume:/tmp/
+    cap_add:
+    - SYS_NICE
+    networks:
+      core:
+        ipv4_address: 10.2.1.4
+    ports:
+    - "2000:2000/tcp"
+    - "2100:2100/tcp"
+    privileged: true
+  athena:
+    container_name: athena_scheduler
+    build:
+      dockerfile: docker/athena.Dockerfile
+      context: ../
+    command: 
+    - python3
+    - main.py
+    - -m
+    - ${SCHEDULER}
+    - --actions
+    - ${ACTIONS}
+    - --actor_weights
+    - ${ACTOR}
+    - --critic_weights
+    - ${CRITIC}
+    - --results
+    - /tmp/results.csv
+    volumes:
+    - srs_athena_volume:/tmp/
+    privileged: true
+    cap_add:
+    - SYS_NICE
+  srsue:
+    container_name: athena_srsue
+    build: 
+      dockerfile: docker/Dockerfile
+      context: ../
+    command: 
+    - srsue
+    - .config/srsran/ue.conf
+    - --rf.device_name=zmq
+    - --rf.device_args=fail_on_disconnect=true,tx_port=tcp://*:2001,rx_port=tcp://10.2.1.4:2000,id=ue,base_srate=23.04e6
+    ports:
+    - "2001:2001/tcp"
+    privileged: true
+    cap_add:
+    - NET_ADMIN
+    - SYS_NICE
+    devices:
+    - /dev/net/tun
+    networks:
+      core:
+        ipv4_address: 10.2.1.5
+networks:
+  core:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.2.1.0/24
+  # ran:
+  #   driver: bridge
+  #   ipam:
+  #     driver: default
+  #     config:
+  #       - subnet: 10.1.1.0/24
+volumes:
+  srs_athena_volume:
