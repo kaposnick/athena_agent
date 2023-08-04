@@ -1,20 +1,28 @@
 import numpy as np
 from multiprocessing import shared_memory
 
-
-MODE_SCHEDULING_NO = 0
-MODE_SCHEDULING_AC = 1
+MODE_SCHEDULING_SRS = 0
+MODE_SCHEDULING_ATHENA = 1
 MODE_SCHEDULING_RANDOM = 2
 
 MODE_TRAINING = 1
 MODE_INFERENCE = 0
 
-NOISE_MIN = -15.0
-NOISE_MAX = 100.0
-BETA_MIN  = 1.0
-BETA_MAX  = 1000.0
-BSR_MIN   = 0
-BSR_MAX   = 180e3
+PROHIBITED_COMBOS = [(0, 0), (0, 1), (0,2), (0, 3), 
+                  (1, 0), (1, 1), (1, 2),
+                  (2, 0), (2, 1),
+                  (3, 0), 
+                  (4, 0), 
+                  (5, 0), 
+                  (6, 0)]
+
+PRB_SPACE = np.array([1, 2, 3, 4, 5, 6, 8, 9, 
+                    10, 12, 15, 16, 18, 
+                    20, 24, 25, 27, 
+                    30, 32, 36, 40, 45], dtype = np.float16)
+
+MCS_SPACE =      np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24],  dtype=np.float16)
+I_MCS_TO_I_TBS = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 23, 24, 25, 26])
 
 def import_tensorflow(debug_level: str, import_tfp = False):
     import os
@@ -29,7 +37,10 @@ def import_tensorflow(debug_level: str, import_tfp = False):
 def get_shared_memory_ref(
         size, dtype, share_memory_name):
         total_variables = int( size / dtype.itemsize )
-        shm = shared_memory.SharedMemory(name=share_memory_name, create=False, size=size)        
+        try:
+            shm = shared_memory.SharedMemory(name=share_memory_name, create=True, size=size)        
+        except:
+            shm = shared_memory.SharedMemory(name=share_memory_name, create=False, size=size)        
         shared_weights_array = np.ndarray(
                                 shape = (total_variables, ),
                                 dtype = dtype,
@@ -56,28 +67,55 @@ def publish_weights_to_shared_memory(weights, shared_ndarray):
             size = len(flattened)
             shared_ndarray[buffer_idx: (buffer_idx + size)] = flattened
             buffer_idx += size
+ 
+tbs_table_path = 'resources/cpp_tbs.json'
+import json
+with open(tbs_table_path) as tbs_json:
+    tbs_table = json.load(tbs_json)
 
-def save_weights(model, save_weights_file, throw_exception_if_error = False):
-    try:
-        print('Saving weights to {} ...'.format(save_weights_file), end='')
-        model.save_weights(save_weights_file)
-        print('Success')
-    except Exception as e:
-        print('Error' + str(e))
-        if (throw_exception_if_error):
-            raise e    
+def to_tbs(mcs, prb):
+    tbs = 0
+    if (prb > 0):
+        i_tbs = I_MCS_TO_I_TBS[mcs]
+        tbs = tbs_table[i_tbs][prb - 1]
+    return tbs
+
+
+def get_action_array():
+    mapping_array = []
+    for mcs in MCS_SPACE:
+        for prb in PRB_SPACE:
+            combo = ( I_MCS_TO_I_TBS[int(mcs)], int(prb) - 1)
+            if combo in PROHIBITED_COMBOS:
+                continue
+            mapping_array.append(
+                {   
+                    'tbs': to_tbs(int(mcs), int(prb)),
+                    'mcs': mcs,
+                    'prb': prb
+                }
+            )
+
+    mapping_array = sorted(mapping_array, key = lambda el: (el['tbs'], el['mcs']))
+    action_array = [np.array([x['mcs'], x['prb']]) for x in mapping_array] # sort by tbs/mcs
+    action_array = np.array(action_array)
+    return action_array
+
 
 if (__name__== '__main__'):
     tf, os, tfp = import_tensorflow('3', False)
     
-    from DDPGAgent import DDPGAgent
+    from agent_ddpg import DDPGAgent
     ddpg_agent = DDPGAgent(tf, 2, 2)
     ddpg_agent.load_actor()
-    ddpg_agent.load_actor_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_99_3_mcs.h5')
+    # ddpg_agent.load_actor_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_99_3_mcs.h5')
+    ddpg_agent.load_actor_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_99.h5')
     ddpg_agent.load_critic()
-    ddpg_agent.load_critic_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_99_3_mcs.h5')
-    state = np.array([0, 31], dtype = np.float32)
-    print(ddpg_agent(state))
+    # ddpg_agent.load_critic_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_99_3_mcs.h5')
+    ddpg_agent.load_critic_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_99.h5')
+    ddpg_agent.set_action_array(get_action_array())
+    context = np.array([0, 46.422], dtype = np.float32)
+    print(ddpg_agent(context))
 
 
 
