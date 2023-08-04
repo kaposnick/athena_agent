@@ -1,3 +1,0 @@
-[submodule "srsRAN"]
-	path = srsRAN
-	url = git@github.com:kaposnick/srsRAN.git
