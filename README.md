@@ -25,7 +25,7 @@ $ git clone --recurse-submodules git@github.com:/kaposnick/athena_agent.git
 
 ```shell
 $ cd srsRAN
-$ sudo apt-get update -y && \ 
+$ apt-get update -y && \ 
     apt-get install -y software-properties-common \ 
     build-essential \
     cmake \ 
@@ -81,11 +81,38 @@ cset:
       worker2         11 n       0 n     0    0 /user/worker2
       worker0          9 n       0 n     0    0 /user/worker0
 ```
-
+ 
 ### 6. Create the UE namespace
 srsUE is going to run on a seperate networking namespace with distinct routing tables.
 
 ```shell
-$ sudo ip netns add ue
+$ ip netns add ue
 ```
 
+### 7. Start srsEPC
+```shell
+$ srsepc .config/srsran/epc.conf \
+  --hss.db_file .config/srsran/user_db.csv
+  --spgw.sgi_if_addr=127.0.0.1
+```
+
+### 8. Start srsUE
+```shell
+$ srsue .config/srsran/ue.conf \
+  --gw.netns=ue
+  --log.filename='/tmp/ue.log' \
+  --rf.device_name=zmq \
+  --rf.device_args="fail_on_disconnect=true,tx_port=tcp://*:2001,rx_port=tcp://localhost:2000,id=ue,base_srate=23.04e6"
+```
+
+### 9. Start srsENB
+```shell
+$ srsenb .config/srsran/enb.conf \
+    --enb_files.sib_config .config/srsran/sib.conf \
+    --enb_files.rr_config .config/srsran/rr.conf \
+    --enb_files.rb_config .config/srsran/rb.conf \
+    --scheduler.policy=time_sched_ai \
+    --expert.pusch_beta_factor=1 \
+    --rf.device_name=zmq \
+    --rf.device_args="fail_on_disconnect=true,tx_port=tcp://*:2101,rx_port=tcp://localhost:2100,id=enb,base_srate=23.04e6"
+```

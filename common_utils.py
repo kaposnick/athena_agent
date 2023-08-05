@@ -102,22 +102,6 @@ def get_action_array():
     return action_array
 
 
-if (__name__== '__main__'):
-    tf, os, tfp = import_tensorflow('3', False)
-    
-    from agent_ddpg import DDPGAgent
-    ddpg_agent = DDPGAgent(tf, 2, 2)
-    ddpg_agent.load_actor()
-    # ddpg_agent.load_actor_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_99_3_mcs.h5')
-    ddpg_agent.load_actor_weights('/home/naposto/phd/nokia/agents/model/ddpg_actor_99.h5')
-    ddpg_agent.load_critic()
-    # ddpg_agent.load_critic_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_99_3_mcs.h5')
-    ddpg_agent.load_critic_weights('/home/naposto/phd/nokia/agents/model/ddpg_critic_99.h5')
-    ddpg_agent.set_action_array(get_action_array())
-    context = np.array([0, 46.422], dtype = np.float32)
-    print(ddpg_agent(context))
-
-
 
 
 
