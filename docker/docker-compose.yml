@@ -86,7 +86,7 @@ services:
       context: ../
     command: 
     - python3
-    - main.py
+    - athea_ml.py
     - -m
     - ${SCHEDULER}
     - --actions
