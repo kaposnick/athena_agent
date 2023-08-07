@@ -116,3 +116,25 @@ $ srsenb .config/srsran/enb.conf \
     --rf.device_name=zmq \
     --rf.device_args="fail_on_disconnect=true,tx_port=tcp://*:2101,rx_port=tcp://localhost:2100,id=enb,base_srate=23.04e6"
 ```
+
+
+### 10. Start ATHENA-ML Scheduler
+After training the DDPG Agent, save the actor/critic weights. The actor-critic model can be modified in <code>agent_ddpg.py</code>.
+
+```shell
+$ python3 athena_ml.py -m athena \
+  --actions 2 \
+  --actor_weights <path_to_actor_weights>
+  --critic_weights <path_to_critic_weights>
+  --results /tmp/results.csv
+```
+
+### 11. Start wireless channel
+```shell
+$ python3 gnuradio/testebed_Wireless_channel.py \
+  --mode=cmd
+  --enb_tx=tcp://localhost:2101 \
+  --enb_rx=tcp://*:2100 \
+  --ue_tx=tcp://localhost:2001 \
+  --ue_rx=tcp://*:2000 
+``` 
