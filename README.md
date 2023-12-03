@@ -3,7 +3,21 @@
 
 <b>ATHENA: Machine Learning and Reasoning for Radio Resources Scheduling in vRAN systems</b> 
 
-The repository contains the code of the paper "ATHENA: Machine Learning and Reasoning for Radio Resources Scheduling in vRAN systems" by N. Apostolakis, M. Gramaglia, L.E. Chatzieleftheriou, T. Subramanya, A. Banchs, H. Sanneck. 
+The repository contains the code of the paper "ATHENA: Machine Learning and Reasoning for Radio Resources Scheduling in vRAN systems" by N. Apostolakis, M. Gramaglia, L.E. Chatzieleftheriou, T. Subramanya, A. Banchs, H. Sanneck in IEEE Journal on Selected Areas in Communications, doi: 10.1109/JSAC.2023.3336155.
+
+Please cite the paper if you plan to use it in your publication.
+
+```BibTex
+@ARTICLE{10329922,
+  author={Apostolakis, Nikolaos and Gramaglia, Marco and Chatzieleftheriou, Livia Elena and Subramanya, Tejas and Banchs, Albert and Sanneck, Henning},
+  journal={IEEE Journal on Selected Areas in Communications}, 
+  title={ATHENA: Machine Learning and Reasoning for Radio Resources Scheduling in vRAN systems}, 
+  year={2023},
+  volume={},
+  number={},
+  pages={1-1},
+  doi={10.1109/JSAC.2023.3336155}}
+```
 
 The software has been tested with the following versions:
 | Software | Version |
