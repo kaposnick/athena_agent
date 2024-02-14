@@ -11,11 +11,12 @@ Please cite the paper if you plan to use it in your publication.
 @ARTICLE{10329922,
   author={Apostolakis, Nikolaos and Gramaglia, Marco and Chatzieleftheriou, Livia Elena and Subramanya, Tejas and Banchs, Albert and Sanneck, Henning},
   journal={IEEE Journal on Selected Areas in Communications}, 
-  title={ATHENA: Machine Learning and Reasoning for Radio Resources Scheduling in vRAN systems}, 
-  year={2023},
-  volume={},
-  number={},
-  pages={1-1},
+  title={ATHENA: Machine Learning and Reasoning for Radio Resources Scheduling in vRAN Systems}, 
+  year={2024},
+  volume={42},
+  number={2},
+  pages={263-279},
+  keywords={Cognition;Biological system modeling;3GPP;Throughput;Computer architecture;Automation;Radio access networks;vRAN;radio resource scheduling;deep reinforcement learning;machine reasoning},
   doi={10.1109/JSAC.2023.3336155}}
 ```
 
