@@ -26,7 +26,7 @@ gain_level_duration = 30
 # gain_levels = [
 # 1.0,  .8,  .6, .5,   .4, .35,  .3, .28, .27, .26, .25, .24, .23, .22, .21, .20, .19,
 # .18, .17, .16, .15, .14, .13, .12, .11, .10, .09, .08, .07, .06]
-congestion_levels = [0, 500, 1000]
+congestion_levels = [0, .5, 1]
 total_loops = 1
 
 class athena_wireless_channel(gr.top_block):
@@ -114,10 +114,16 @@ def input_thread(tb):
                         gain = parse_input_token(tok_gain, 'gain')
                         if (beta == None or gain == None):
                             continue                        
+                        if (beta < 0 or beta > 1):
+                            print(f'Beta {beta} not in range [0,1]. Skipping...')
+                            continue
+                        if (gain < .06 or gain > 1):
+                            print(f'Gain {gain} not in range [.06, 1]. Skipping...')
+                            continue
                         
                         tb.set_multiply_level_ue1(gain)
                         current_gain_level_bytes = (int(gain * 1000)).to_bytes(2, byteorder='little')
-                        congestion_level_bytes   = (int(beta)).to_bytes(4, byteorder='little')
+                        congestion_level_bytes   = (int(beta * 1000)).to_bytes(4, byteorder='little')
                         file_write.write(congestion_level_bytes + current_gain_level_bytes)
                         file_write.flush()
                     except Exception as e:
@@ -143,7 +149,7 @@ def automated_monitoring_thread(tb):
                     if (current_cpu_level_idx == 0):
                         print('Loop {}/{}'.format(loops+1, total_loops))
                     # iterate through the CPU congestion levels (outer loop - slower)
-                    congestion_level = congestion_levels[current_cpu_level_idx]
+                    congestion_level = congestion_levels[current_cpu_level_idx] * 1000
                     congestion_level_bytes = congestion_level.to_bytes(4, byteorder='little')
                     gain_level_byte = int(0).to_bytes(2, byteorder='little')
                     file_write.write(congestion_level_bytes + gain_level_byte)

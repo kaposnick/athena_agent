@@ -34,4 +34,4 @@ WORKDIR /home/gnuradio
 
 ENV PYTHONPATH "${PYTHONPATH}:/usr/local/lib/python3/dist-packages"
 
-COPY gnuradio/testbed_wireless_channel.py /home/gnuradio
+COPY gnuradio/wireless_channel.py /home/gnuradio

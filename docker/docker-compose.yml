@@ -62,7 +62,7 @@ services:
       context: ../
     command:
     - python3
-    - testbed_wireless_channel.py
+    - wireless_channel.py
     - --mode=cmd
     - --enb_tx=tcp://10.2.1.3:2101
     - --enb_rx=tcp://*:2100

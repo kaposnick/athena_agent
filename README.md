@@ -20,136 +20,19 @@ Please cite the paper if you plan to use it in your publication.
   doi={10.1109/JSAC.2023.3336155}}
 ```
 
-The software has been tested with the following versions:
-| Software | Version |
-| -------- | ------- |
-| OS       | Ubuntu 22.04 |
-| Kernel   | 5.15.0-58.generic  |
-| Python   | 3.8 |
-| Tensorflow | 2.9.1 |
-| GNU Radio Companion | 3.9 |
-| iperf | 2.0.13|
-| cset     | 1.6 |
-
-
-### 1. Clone the repository
-```shell
-$ git clone --recurse-submodules git@github.com:/kaposnick/athena_agent.git
-```
-### 2. srsRAN Local installation
-
-```shell
-$ cd srsRAN
-$ apt-get update -y && \ 
-    apt-get install -y software-properties-common \ 
-    build-essential \
-    cmake \ 
-    libfftw3-dev \
-    libmbedtls-dev \
-    libboost-program-options-dev \
-    libconfig++-dev \
-    libsctp-dev \
-    libzmq3-dev
-$ mkdir build
-$ cd build
-$ cmake ../
-$ make
-$ make install
-$ ./srsran_install_configs.sh user
-```
-### 3. Python 3.8 Installation
-Make sure that Python 3.8 or above is installed, along with <code>numpy</code>, <code>tensorflow</code>, <code>scipy</code>.
-
-### 4. GNU Radio Companion (GRC) installlation 
-Follow the GNU Radio Companion official installation guidlines. The Python libraries are needed so that the channel emulation module is run correctly.
-
-### 5. CPU Isolation
-Prevent default Linux scheduler from allocating tasks (threads) on a user-predefined CPU set. In this setup I run it on a 12-CPU server and I pick the last 3 CPUs to isolate.
-
-Open with an editor of your choice file <code>/etc/default/grub</code> and set the following parameter to <code>GRUB_CMDLINE_LINUX_DEFAULT="maybe-ubiquity isolcpus=9-11"</code>. After run
-```shell
-$ update-grub
-$ reboot
-```
-so that the isolation takes effect.
-
-We will create the CPU set that the srsENB PHY threads are going to run on. 
-(run as root)
-
-```shell
-$ cset shield --kthread on --cpu=9-11
-$ cset set user/worker0 --cpu=9
-$ cset set user/worker1 --cpu=10
-$ cset set user/worker2 --cpu=11
+To get started, clone this repository to your local machine using the following command:
+```bash
+git clone --recurse-submodules git@github.com:/kaposnick/athena_agent.git
 ```
 
-verify that the CPU set namespace is created correctly. We can see the user <code>cpuset</code> namespace that is created.
-```shell
-$ cset set --list -r
-cset: 
-         Name       CPUs-X    MEMs-X Tasks Subs Path
- ------------ ---------- - ------- - ----- ---- ----------
-         root       0-11 y       0 y   142    2 /
-         user       9-11 y       0 n     0    3 /user
-       system        0-8 y       0 n   426    0 /system
-      worker1         10 n       0 n     0    0 /user/worker1
-      worker2         11 n       0 n     0    0 /user/worker2
-      worker0          9 n       0 n     0    0 /user/worker0
-```
- 
-### 6. Create the UE namespace
-srsUE is going to run on a seperate networking namespace with distinct routing tables.
-
-```shell
-$ ip netns add ue
+and navigate to the project repository:
+```bash
+cd athena_agent
 ```
 
-### 7. Start srsEPC
-```shell
-$ srsepc .config/srsran/epc.conf \
-  --hss.db_file .config/srsran/user_db.csv
-  --spgw.sgi_if_addr=127.0.0.1
-```
+Instructions on how to setup the server and reproduce the scenarios of the paper can be found on 
 
-### 8. Start srsUE
-```shell
-$ srsue .config/srsran/ue.conf \
-  --gw.netns=ue
-  --log.filename='/tmp/ue.log' \
-  --rf.device_name=zmq \
-  --rf.device_args="fail_on_disconnect=true,tx_port=tcp://*:2001,rx_port=tcp://localhost:2000,id=ue,base_srate=23.04e6"
-```
+### Server Setup and Scenarios
+Instructions on setting up the server and running scenarios can be found in the scenarios/ folder. Please refer to the respective markdown files for detailed guidance.
 
-### 9. Start srsENB
-```shell
-$ srsenb .config/srsran/enb.conf \
-    --enb_files.sib_config .config/srsran/sib.conf \
-    --enb_files.rr_config .config/srsran/rr.conf \
-    --enb_files.rb_config .config/srsran/rb.conf \
-    --scheduler.policy=time_sched_ai \
-    --expert.pusch_beta_factor=1 \
-    --rf.device_name=zmq \
-    --rf.device_args="fail_on_disconnect=true,tx_port=tcp://*:2101,rx_port=tcp://localhost:2100,id=enb,base_srate=23.04e6"
-```
-
-
-### 10. Start ATHENA-ML Scheduler
-After training the DDPG Agent, save the actor/critic weights. The actor-critic model can be modified in <code>agent_ddpg.py</code>.
-
-```shell
-$ python3 athena_ml.py -m athena \
-  --actions 2 \
-  --actor_weights <path_to_actor_weights>
-  --critic_weights <path_to_critic_weights>
-  --results /tmp/results.csv
-```
-
-### 11. Start wireless channel
-```shell
-$ python3 gnuradio/testbed_wireless_channel.py \
-  --mode=cmd
-  --enb_tx=tcp://localhost:2101 \
-  --enb_rx=tcp://*:2100 \
-  --ue_tx=tcp://localhost:2001 \
-  --ue_rx=tcp://*:2000 
-``` 
+If you encounter any issues or have questions, feel free to open an issue or reach out to us.
