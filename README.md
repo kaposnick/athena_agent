@@ -146,7 +146,7 @@ $ python3 athena_ml.py -m athena \
 
 ### 11. Start wireless channel
 ```shell
-$ python3 gnuradio/testebed_Wireless_channel.py \
+$ python3 gnuradio/testbed_wireless_channel.py \
   --mode=cmd
   --enb_tx=tcp://localhost:2101 \
   --enb_rx=tcp://*:2100 \
