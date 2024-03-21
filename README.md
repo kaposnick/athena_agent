@@ -30,8 +30,6 @@ and navigate to the project repository:
 cd athena_agent
 ```
 
-Instructions on how to setup the server and reproduce the scenarios of the paper can be found on 
-
 ### Server Setup and Scenarios
 Instructions on setting up the server and running scenarios can be found in the scenarios/ folder. Please refer to the respective markdown files for detailed guidance.
 
